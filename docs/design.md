@@ -24,7 +24,7 @@ A declaration names two things.
 
 The change is to the subject, never to the check. Mutating the check's own assertion proves only that the assertion is sensitive to itself.
 
-Candidate shape, *open* until the skeleton settles it:
+The shape as built. The decorator attaches the declaration to the function and returns it unchanged, so fixture resolution is untouched:
 
 ```python
 import falsetto
@@ -37,7 +37,11 @@ def test_route_keeps_thread_key(msg):
     assert route.thread_key == msg.thread_key
 ```
 
-*Open*: whether input and fixture mutations get their own declaration form, or ride the same handle.
+`must_fail_when(change, *, expect=AssertionError, describe=None)`. The handle is pytest's `MonkeyPatch`, so `setattr`, `setitem`, `delattr`, `setenv` and `delenv` all revert automatically. Input and fixture mutations ride the same handle for now; a dedicated form is *open* until a real suite asks for one.
+
+## 3a. One core, many front-ends
+
+Only `falsetto.core` computes verdicts. `core.prove(run, declaration, subject)` performs the negative run given a plain callable that executes the check once; `core.check(...)` performs both runs for a front-end that does not run checks itself. The pytest plugin is an adapter: pytest performs the positive run, and the plugin hands `item.runtest` to `core.prove`. A bespoke harness, or a port, calls the same functions. There is no second implementation of the four states anywhere, which is what keeps every front-end from drifting.
 
 ## 4. The two runs and the four verdicts
 
@@ -71,7 +75,7 @@ Two design notes. Statistical evals need a change strong enough to move the aggr
 
 ## 7. Feedback for agents
 
-The report has two forms: a human line per verdict, and a JSON record per check.
+The report has two forms: a human line per non-green verdict, shipped, and a JSON record per check, planned.
 
 ```json
 {"check": "tests/test_router.py::test_route_keeps_thread_key",

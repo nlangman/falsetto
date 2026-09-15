@@ -54,4 +54,12 @@ An evaluation cell is a check. Its declared change is a planted wrong answer or 
 
 ## Status
 
-Pre-alpha. Nothing to install yet. The design is in [docs/design.md](docs/design.md) and the build plan in [docs/plan.md](docs/plan.md).
+Pre-alpha, installable from source, not yet on PyPI.
+
+```
+pip install -e .
+pytest examples/router          # the four verdicts, one check each
+pytest                          # Falsetto's own checks, each one proven
+```
+
+The design is in [docs/design.md](docs/design.md) and the build plan in [docs/plan.md](docs/plan.md).
