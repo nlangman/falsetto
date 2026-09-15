@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -38,7 +38,7 @@ Changelog = "https://github.com/nlangman/falsetto/blob/main/CHANGELOG.md"
 falsetto = "falsetto.plugin"
 
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.10"]
+dev = ["ruff>=0.6", "mypy>=1.10", "pytest-xdist>=3.5"]
 
 [tool.hatch.version]
 path = "src/falsetto/__init__.py"
@@ -48,7 +48,8 @@ packages = ["src/falsetto"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--falsetto-strict"
+falsetto = true
+falsetto_strict = true
 
 [tool.ruff]
 line-length = 100
@@ -66,4 +67,4 @@ quote-style = "double"
 [tool.mypy]
 python_version = "3.10"
 strict = true
-files = ["src/falsetto"]
+files = ["src/falsetto", "tests", "examples"]

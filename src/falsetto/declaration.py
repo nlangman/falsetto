@@ -7,26 +7,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-Change = Callable[[Any], None]
-Expect = type[BaseException] | tuple[type[BaseException], ...] | Callable[[BaseException], bool]
+from .patching import Patch
+
+Change = Callable[[Patch], None]
+ExceptionTypes = type[BaseException] | tuple[type[BaseException], ...]
+Expect = ExceptionTypes | Callable[[BaseException], bool]
 
 ATTR = "__falsetto_declaration__"
-
-
-def _unwrap(func: Any) -> Any:
-    func = getattr(func, "__func__", func)  # bound method -> function
-    return inspect.unwrap(func)
-
-
-def raised_in(exc: BaseException, func: Any) -> bool:
-    """Return True when ``exc`` was raised directly in ``func``'s own frame."""
-    code = getattr(_unwrap(func), "__code__", None)
-    tb = exc.__traceback__
-    last = None
-    while tb is not None:
-        last = tb
-        tb = tb.tb_next
-    return last is not None and last.tb_frame.f_code is code
+UNDESCRIBED = "(undescribed change; pass describe= to name it)"
 
 
 def _describe_callable(fn: Callable[..., Any]) -> str:
@@ -36,10 +24,10 @@ def _describe_callable(fn: Callable[..., Any]) -> str:
     try:
         src = " ".join(inspect.getsource(fn).split())
     except (OSError, TypeError):
-        return repr(fn)
+        return UNDESCRIBED
     start = src.find("lambda")
     if start < 0:
-        return src[:160]
+        return UNDESCRIBED
     src = src[start:]
     depth = 0
     for i, ch in enumerate(src):
@@ -53,64 +41,86 @@ def _describe_callable(fn: Callable[..., Any]) -> str:
     return src.rstrip(", ")[:160]
 
 
+def _type_names(types: ExceptionTypes) -> str:
+    if isinstance(types, type):
+        return types.__name__
+    return " or ".join(t.__name__ for t in types)
+
+
 @dataclass(frozen=True)
 class Declaration:
     """The change to the subject that must make a check fail, and the failure expected.
 
-    ``change`` receives a scoped patching handle (pytest's ``MonkeyPatch``) and mutates
-    the subject in-process; the handle reverts everything when the negative run ends.
-    ``expect`` is an exception type, a tuple of types, or a predicate over the exception.
-    With the default expectation, ``AssertionError``, the failure must also be raised in
-    the check's own frame: "it crashed somewhere" is not proof.
+    ``change`` receives a :class:`~falsetto.patching.Patch` and mutates the subject
+    in-process; the handle reverts everything when the negative run ends. ``expect``
+    is an exception type, a tuple of types, or a predicate over the exception. When it
+    is None the front-end's default applies: for the pytest plugin, an ``AssertionError``
+    or a ``pytest.fail``. A failure of any other kind is "wrong reason", never proof.
     """
 
     change: Change
-    expect: Expect = AssertionError
+    expect: Expect | None = None
     describe: str | None = None
 
     @property
     def description(self) -> str:
         """A short human description of the declared change, for reports."""
-        return self.describe or _describe_callable(self.change)
+        text = self.describe or _describe_callable(self.change)
+        if self.expect is not None:
+            text += f" [expect={self.expectation}]"
+        return text
 
-    def matches(self, exc: BaseException, func: Any) -> tuple[bool, str]:
+    @property
+    def expectation(self) -> str:
+        if self.expect is None:
+            return "default"
+        if isinstance(self.expect, type | tuple):
+            return _type_names(self.expect)
+        return f"predicate {getattr(self.expect, '__qualname__', repr(self.expect))}"
+
+    def matches(self, exc: BaseException | None, default: ExceptionTypes) -> tuple[bool, str]:
         """Decide whether ``exc`` is the failure this declaration expects.
 
         Returns ``(ok, why)``; ``why`` explains a rejection in one clause.
         """
-        expect = self.expect
+        if exc is None:
+            return False, "the failure's exception could not be inspected"
+        expect = self.expect if self.expect is not None else default
         if isinstance(expect, type | tuple):
-            if not isinstance(exc, expect):
-                wanted = (
-                    expect.__name__
-                    if isinstance(expect, type)
-                    else "/".join(t.__name__ for t in expect)
-                )
-                return False, f"expected {wanted}, got {type(exc).__name__}"
-            if expect is AssertionError and not raised_in(exc, func):
-                return False, "AssertionError was raised outside the check's own frame"
-            return True, "ok"
-        ok = bool(expect(exc))
-        return ok, "ok" if ok else f"predicate rejected {type(exc).__name__}"
+            if isinstance(exc, expect):
+                return True, "ok"
+            return False, f"expected {_type_names(expect)}, got {type(exc).__name__}"
+        try:
+            ok = bool(expect(exc))
+        except Exception as e:
+            return False, f"the expectation predicate raised {type(e).__name__}: {e}"
+        return ok, "ok" if ok else f"the expectation predicate rejected {type(exc).__name__}"
 
 
 def must_fail_when(
     change: Change,
     *,
-    expect: Expect = AssertionError,
+    expect: Expect | None = None,
     describe: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Declare the change to the subject under which the decorated check must fail.
 
-    The decorator attaches the declaration and returns the function unchanged, so
-    the runner's fixture resolution and signature handling are untouched.
+    The decorator attaches the declaration and returns the function unchanged, so the
+    runner's fixture resolution and signature handling are untouched. Applying it
+    twice is an error: a check has one declaration.
     """
 
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
+        if _already_declared(func):
+            raise TypeError(f"{func.__qualname__} already carries a declaration")
         setattr(func, ATTR, Declaration(change=change, expect=expect, describe=describe))
         return func
 
     return decorate
+
+
+def _already_declared(func: Any) -> bool:
+    return getattr(func, ATTR, None) is not None
 
 
 def get_declaration(obj: Any) -> Declaration | None:

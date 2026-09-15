@@ -1,9 +1,24 @@
 """Falsetto: a test runner that refuses to count a check unless it can prove
 the check is capable of failing."""
 
-from .core import check, prove
+from .core import Outcome, RunResult, check, check_callable, prove, run_callable
 from .declaration import Declaration, must_fail_when
-from .verdict import Result, Verdict
+from .patching import Patch
+from .verdict import Reason, Result, Verdict
 
 __version__ = "0.0.1"
-__all__ = ["Declaration", "Result", "Verdict", "__version__", "check", "must_fail_when", "prove"]
+__all__ = [
+    "Declaration",
+    "Outcome",
+    "Patch",
+    "Reason",
+    "Result",
+    "RunResult",
+    "Verdict",
+    "__version__",
+    "check",
+    "check_callable",
+    "must_fail_when",
+    "prove",
+    "run_callable",
+]

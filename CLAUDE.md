@@ -5,7 +5,7 @@ increment ledger. This file says how to work here.
 
 ## The one rule
 
-Every check declares the change to the subject that must make it red. The suite runs
+Every check declares the change to the subject that must make it red. The repository runs
 in strict mode, so an undeclared check fails the build. Before writing a check, answer
 "what change should make this red?" in one sentence; that sentence is the declaration.
 The change is to the subject, never to the check.
@@ -22,11 +22,25 @@ uv run mypy
 
 ## Shape
 
-- `src/falsetto/core.py` is the only place verdicts are computed. Front-ends adapt to
-  it; they never re-implement the four states.
-- `src/falsetto/plugin.py` is the pytest adapter. pytest performs the positive run.
-- `src/falsetto/declaration.py` and `verdict.py` are runner-free.
+- `src/falsetto/core.py` is the only place verdicts are computed, and it imports nothing
+  from pytest. Front-ends adapt to it; they never re-implement the verdicts.
+- `src/falsetto/plugin.py` is the pytest adapter. It runs whole protocols and observes
+  reports; a declaration's change is applied before setup.
+- `src/falsetto/patching.py`, `declaration.py` and `verdict.py` are runner-free.
 - `examples/router/` is the README's example and is checked by the suite.
+
+## Writing Falsetto's own checks
+
+Declarations live in `tests/helpers.py` or next to the check, and they target the property
+the check names: a check about the control run declares "no control run", not "everything
+is proven". Three lessons the suite already paid for:
+
+- Never patch the handle's own revert path (`Patch.undo`, `Patch.__exit__`) at class level;
+  the outer handle then cannot revert, and every later run leaks. Rebind a module-level
+  name the check reads instead.
+- A conftest planted for a nested run must restore what it changes, in `pytest_unconfigure`.
+- A check that falsifies a revert must reset its own subject: use a class defined inside the
+  check, not a module-level one.
 
 ## Each increment
 
@@ -38,5 +52,6 @@ uv run mypy
 
 ## Style
 
-Type-annotated, `mypy --strict` clean, `ruff` clean. Default to no comments; add one
-only when the why is not obvious. Commit subjects are imperative; bodies say why.
+Type-annotated, `mypy --strict` clean over `src`, `tests` and `examples`, `ruff` clean.
+Default to no comments; add one only when the why is not obvious. Commit subjects are
+imperative; bodies say why.
