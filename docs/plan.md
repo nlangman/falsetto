@@ -9,12 +9,19 @@ Increments in order. Each names the check that proves it and leaves the tree gre
 | 1b | The run seam, after review round one: whole-protocol runs with a control run, a pytest-free core with its own patch handle, opt-in by default, false checks as real failures, the denominator, loud internal errors, the JSON report, a test matrix over every class the reviewers broke | Falsetto's own suite is fully proven in strict mode; a check with a no-op declaration and its own residue is unproven, never proven | done |
 | 1c | The boundary, after review round two: the declaration's scope is the teardown boundary for every run; the control run precedes the negative run; out-of-scope instead of false when a wider fixture was not rebuilt; coverage paused during graded runs; internal errors loud without a call report; a forge-proof verdict record; evidence in reports; a draining, inheritance-aware patch handle | Two byte-identical checks over a module fixture are proven whether first or last; an alternating check is unproven; the own suite is fully proven | done |
 | 1d | The reach of the scope guard, after review round three: every fixture the check used by any route, infrastructure excluded; out-of-scope and misconfigured fail the build; a control-run count; descriptor-safe class patching; early-stop teardown; the post-grading teardown failure merged into the check's own report; debuggers paused; package scope; a completeness signal in the JSON report | Fixtures reached indirectly are out of scope, pytest's own session fixtures never shield a false check, and two control runs catch residue that appears on the third execution; the own suite is fully proven | done |
-| 2 | Vacuity demo: the README example as a script that applies the fixture change and re-runs | The verdict line changes between the two fixture states | next |
+| 2 | Vacuity demo: the README example as a script that applies the fixture change and re-runs | The verdict line changes between the two fixture states | after the release |
 | 3 | Dogfood on our own suites | At least one confirmed false or unproven check found | |
 | 4 | Eval falsifier with a fake judge | A judge that scores garbage high reports the eval false | |
 | 5 | Proof cache with a deliberately coarse key | A second run skips negative runs; a change to a fixture file in another directory re-runs them | |
 | 6 | Agent-session integration over the JSON report | An unproven or false hint surfaces inside an agent's authoring session | |
-| 7 | Public release: README for strangers, package name, history sweep, visibility flip | The leak gate over the full history is clean, and proven red on a planted term first | |
+| 7 | Public release: README for strangers, package name, history sweep, visibility flip | The leak gate over the full history is clean, and proven red on a planted term first | next |
+
+## Order
+
+Row 7, the public release, comes next, ahead of rows 2 to 6: the repository goes public as a
+pre-alpha with its limits stated, and the remaining rows follow in public. Whether row 3, the
+dogfood on a real suite, or a second project comes first after that is decided after the
+release.
 
 ## Example project
 
