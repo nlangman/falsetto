@@ -7,8 +7,8 @@ All notable changes to Falsetto are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
-- The declaration: `must_fail_when(change, *, expect=None, describe=None)`, with Falsetto's
-  own patching handle (`Patch`) and a visible expectation in reports.
+- The declaration: `must_fail_when(change, *, expect=None, describe=None, scope="function")`,
+  with Falsetto's own patching handle (`Patch`) and a visible expectation in reports.
 - The runner-agnostic core: `check_callable`, `check`, `prove`, `run_callable`, `RunResult`.
   It imports nothing from pytest.
 - The pytest adapter: whole-protocol negative and control runs, verdicts as native categories,
@@ -28,6 +28,8 @@ All notable changes to Falsetto are recorded here. The format follows
   every verdict record and in the summary.
 - Coverage measurement is paused during the control and negative runs.
 - A warning at startup naming plugins that also implement the run protocol.
+- `--falsetto-controls` and the `falsetto_controls` ini key: the number of control runs.
+- `scope="package"`; `complete` and `stopped` in the JSON report.
 
 ### Changed
 - After review round one the negative run became a whole fresh protocol with the change
@@ -38,3 +40,9 @@ All notable changes to Falsetto are recorded here. The format follows
   and non-strict unproven keep pytest's `passed` category, the verdict line says "failed as
   written", the verdict record is namespaced and read last-wins, a `no_proof` marker needs a
   reason and is listed, and strict mode fails any session that graded nothing.
+- After review round three the scope guard reads every fixture the check used by any route
+  and ignores fixtures pytest or installed plugins define; out-of-scope and misconfigured
+  verdicts fail the build; class attributes are restored as the descriptors they were; a
+  post-grading teardown failure is merged into the check's own teardown report; the
+  debugger plugins are paused during graded runs; an unwritable JSON report is an
+  internal-error exit.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 from collections.abc import Callable, MutableMapping
 from typing import Any
@@ -45,10 +46,17 @@ class Patch:
             ) from errors[0]
 
     def setattr(self, target: object, name: str, value: object, raising: bool = True) -> None:
-        """Set ``target.name = value``; restore, or remove, it on undo."""
+        """Set ``target.name = value``; restore, or remove, it on undo.
+
+        On a class the raw descriptor is restored, so a staticmethod or classmethod
+        comes back as one, and an inherited attribute comes back inherited.
+        """
         namespace = getattr(target, "__dict__", None)
         own = namespace is None or name in namespace
-        old = getattr(target, name, _MISSING)
+        if inspect.isclass(target) and own and namespace is not None:
+            old: object = namespace[name]
+        else:
+            old = getattr(target, name, _MISSING)
         if old is _MISSING and raising:
             raise AttributeError(f"{target!r} has no attribute {name!r}")
         setattr(target, name, value)

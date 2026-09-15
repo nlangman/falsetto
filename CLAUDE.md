@@ -15,7 +15,7 @@ The change is to the subject, never to the check.
 ```
 uv sync                                   # environment with the dev tools
 uv run pytest                             # own checks, strict; every one must be proven
-uv run pytest examples/router             # must print: 1 proven, 1 failed, 1 false, 1 unproven
+uv run pytest examples/router             # must print: 1 proven, 1 failed as written, 1 false, 1 unproven
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
 ```
@@ -47,6 +47,10 @@ is proven". Three lessons the suite already paid for:
   branch in the code it falsifies.
 - Under xdist, a falsifier patched in the controller does not reach the workers; falsify what
   the controller reads back.
+- Do not make a line number part of an assertion on pytester output; pytester strips the
+  leading newline of the file it writes. Assert the file name.
+- A falsifier that renames a property both sides read still agrees with itself; give the
+  reading side its own seam.
 
 ## Each increment
 

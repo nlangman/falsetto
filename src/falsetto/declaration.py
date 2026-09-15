@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, get_args
 
 from .patching import Patch
 
@@ -15,7 +15,8 @@ Expect = ExceptionTypes | Callable[[BaseException], bool]
 
 ATTR = "__falsetto_declaration__"
 UNDESCRIBED = "(undescribed change; pass describe= to name it)"
-SCOPES = ("function", "class", "module", "session")
+Scope = Literal["function", "class", "module", "package", "session"]
+SCOPES: tuple[str, ...] = get_args(Scope)
 
 
 def _describe_callable(fn: Callable[..., Any]) -> str:
@@ -62,7 +63,7 @@ class Declaration:
     change: Change
     expect: Expect | None = None
     describe: str | None = None
-    scope: str = "function"
+    scope: Scope = "function"
     """How deep the change reaches: the fixture scopes rebuilt under it for each run."""
 
     def __post_init__(self) -> None:
@@ -111,12 +112,12 @@ def must_fail_when(
     *,
     expect: Expect | None = None,
     describe: str | None = None,
-    scope: str = "function",
+    scope: Scope = "function",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Declare the change to the subject under which the decorated check must fail.
 
     ``scope`` says how deep the change reaches: which fixture scopes ("function",
-    "class", "module" or "session") are rebuilt under the change for each run. The
+    "class", "module", "package" or "session") are rebuilt under the change for each run. The
     default rebuilds only the check's own function-scoped fixtures. The decorator
     attaches the declaration and returns the function unchanged, so the runner's
     fixture resolution and signature handling are untouched. Applying it twice is an

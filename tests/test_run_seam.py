@@ -56,7 +56,7 @@ def test_a_check_that_fails_on_rerun_is_never_proven(pytester: pytest.Pytester) 
     result = pytester.runpytest(*RUN)
     out = result.stdout.str()
     assert line(0, 0, 0, 1) in out
-    assert "control run failed" in out
+    assert "control run 1 failed" in out
 
 
 FIXTURE_TARGET = """
@@ -162,7 +162,8 @@ def test_a_wider_fixture_makes_a_passing_negative_run_out_of_scope_not_false(
     out = result.stdout.str()
     assert line(0, 0, 0, 1) in out
     assert "ident (module-scoped)" in out
-    assert "scope='module'" in out
+    assert "Widen scope=" in out
+    assert result.ret == 1
 
 
 SESSION_FIXTURE = """

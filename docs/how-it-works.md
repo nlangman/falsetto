@@ -23,13 +23,15 @@ only `falsetto.core` computes a verdict.
    `pytest_runtest_makereport` wrapper.
 5. **The core grades.** `core.prove(run, declaration, positive, ...)` receives a `run`
    callable that performs one more unlogged protocol at the same boundary, with coverage
-   paused. The core runs the control run, applies the change through a `Patch`, runs the
-   negative run, reverts, and classifies. `plugin._wider_fixtures` tells it which fixtures
-   the check uses beyond the declaration's scope, so a passing negative run becomes
-   "out of scope" rather than "false" when the change may never have reached them.
-6. **The real teardown.** `plugin._teardown_to` tears the fixture stack down to what the
-   next item actually needs, as pytest's own teardown would have; a failure there becomes
-   a teardown report, never silence.
+   paused and the debugger plugins unregistered. The core runs the control runs, applies
+   the change through a `Patch`, runs the negative run, reverts, and classifies.
+   `plugin._wider_fixtures` tells it which suite-defined fixtures the check used, by any
+   route, beyond the declaration's scope, so a passing negative run becomes "out of scope"
+   rather than "false" when the change may never have reached them.
+6. **The real teardown.** For a declared check, `plugin._teardown_to` tears the fixture
+   stack down to what the next item actually needs, or entirely when the session is about
+   to stop, as pytest's own teardown would have; a failure there is merged into the check's
+   teardown report, never silence.
 7. **The verdict is attached.** `plugin._attach` puts the `Result` on the call and
    teardown reports as one JSON record under `falsetto.verdict`, appended last so nothing
    a test recorded under that name can win. A false verdict, a strict unproven verdict,
@@ -61,7 +63,7 @@ sequenceDiagram
     core->>core: revert; classify
     core-->>plugin: Result(verdict, reason, detail, evidence)
     plugin->>plugin: tear down to the real next item; attach the record; mark failures
-    plugin->>pytest: pytest_runtest_logreport x3
+    plugin->>pytest: pytest_runtest_logreport x3 (setup, call, teardown)
 ```
 
 ## Where a new front-end plugs in

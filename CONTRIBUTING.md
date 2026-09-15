@@ -9,7 +9,7 @@ git clone https://github.com/nlangman/falsetto
 cd falsetto
 uv sync                 # creates .venv with the package and the dev tools
 uv run pytest           # Falsetto's own checks, in strict mode
-uv run pytest examples/router
+uv run pytest examples/router   # the repository's strict setting applies, so exit 1 is expected
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
 ```

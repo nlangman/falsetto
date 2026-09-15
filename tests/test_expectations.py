@@ -221,7 +221,7 @@ def any_scope_goes(m: falsetto.Patch) -> None:
 @falsetto.must_fail_when(any_scope_goes)
 def test_an_unknown_scope_is_an_error() -> None:
     with pytest.raises(ValueError, match="scope must be one of"):
-        Declaration(lambda m: None, scope="bogus")
+        Declaration(lambda m: None, scope="bogus")  # type: ignore[arg-type]
 
 
 def lambdas_are_undescribed(m: falsetto.Patch) -> None:

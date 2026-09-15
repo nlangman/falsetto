@@ -33,7 +33,7 @@ A month later a colleague simplifies the shared fixture in another file, so `msg
 ## How it works
 
 1. **The declaration.** Every check declares one change to the **subject** (the code under test, its input, its fixture, or its environment) that must make the check fail. The change is ordinary code you write, applied through a patching handle that reverts everything afterwards. Nothing is generated, nothing is edited on disk, and no model is involved.
-2. **Three runs.** The check runs as written and must pass. It runs a second time, unchanged, as a whole fresh test with setup and teardown, and must pass again: that control run is what stops a check that fails on its own second execution from being credited to the change. Then it runs under the declared change, applied before setup, and must fail with an assertion.
+2. **Three runs.** The check runs as written and must pass. It runs a second time, unchanged, as a whole fresh test with setup and teardown, and must pass again: that control run catches every check that does not pass on its second execution, before a failure could be credited to the change. Then it runs under the declared change, applied before setup, and must fail with an assertion.
 3. **Four verdicts.**
 
 | Verdict | Meaning |
@@ -41,7 +41,7 @@ A month later a colleague simplifies the shared fixture in another file, so `msg
 | **proven** | Passed as written, passed again without the change, and failed under it. |
 | **failed** | Failed as written. An ordinary red check. |
 | **false** | Passed as written, and still passed under its declared change. The check is wrong. **This fails the build.** |
-| **unproven** | Nothing is known yet: no declaration, or no failure could be attributed to the change. Fails the build in strict mode. |
+| **unproven** | Nothing is known yet: no declaration, or no failure could be attributed to the change. Fails the build in strict mode. Two kinds always fail the build: **out of scope** (the check uses a fixture wider than its declaration rebuilds, so the change may never have reached it) and **misconfigured** (a declaration or marker that contradicts itself). |
 
 ```mermaid
 flowchart TD
@@ -53,7 +53,7 @@ flowchart TD
     C -->|did not pass| U2[UNPROVEN: not repeatable]
     C -->|passed| P[Apply the declared change, then a fresh run under it]
     P -->|could not apply| U3[UNPROVEN: not applied]
-    P -->|passed, and it uses fixtures wider than the declaration's scope| U4[UNPROVEN: out of scope]
+    P -->|passed, and it uses fixtures wider than the declaration's scope| U4[UNPROVEN: out of scope, fails the build]
     P -->|passed| X[FALSE: fails the build]
     P -->|skipped, errored, or an unexpected exception| U5[UNPROVEN: wrong reason]
     P -->|failed for the stated reason| PR[PROVEN]
@@ -97,17 +97,17 @@ falsetto_strict = true
 
 Falsetto is inert unless enabled. A check that cannot be proven on purpose, such as one that talks to a live service, is excluded with `@pytest.mark.no_proof("reason")`; the reason is required, the check is listed by name in the summary, it is counted as excluded in the verdict line, and it is never a pass. In strict mode a session that ran checks and graded none fails, whatever the reason.
 
-**The declaration.** `@falsetto.must_fail_when(change, *, expect=None, describe=None, scope="function")`. `change` receives a handle with `setattr`, `setitem`, `delattr`, `delitem`, `setenv` and `delenv`; everything it does is undone after the run. By default the check must fail with an `AssertionError` or a `pytest.fail`; any other exception is "wrong reason", never proof. Pass `expect=SomeError` when the failure you mean is a different one. Pass `describe="..."` to name the change in reports. `scope` says how deep the change reaches: which fixture scopes are rebuilt under it. The default rebuilds only the check's own function-scoped fixtures; a change that must reach a module- or session-scoped fixture says `scope="module"` or `scope="session"` and pays for the rebuild. A check that uses a wider fixture without saying so is never accused of being false; it is unproven, with the scope named.
+**The declaration.** `@falsetto.must_fail_when(change, *, expect=None, describe=None, scope="function")`. `change` receives a handle with `setattr`, `setitem`, `delattr`, `delitem`, `setenv` and `delenv`; everything it does is undone after the run, and a class attribute comes back as the descriptor it was. By default the check must fail with an `AssertionError` or a `pytest.fail`; any other exception is "wrong reason", never proof. Pass `expect=SomeError` when the failure you mean is a different one. Pass `describe="..."` to name the change in reports; without it the change's source text is printed, so anything sensitive in a change, such as a credential passed to `setenv`, needs a `describe`. `scope` says how deep the change reaches: which fixture scopes ("function", "class", "module", "package" or "session") are rebuilt under it for every run. The default rebuilds only function-scoped fixtures. A check that uses a fixture wider than that, by any route, and still passes under the change is reported out of scope with the fixture named, and that fails the build: the check cannot be graded under its declaration until the scope is widened or the check reads the subject directly. Fixtures pytest or an installed plugin defines never count. `scope="session"` rebuilds the session's fixtures for that check and for every test after it, so a suite whose later tests rely on state accumulated in session fixtures sees it reset.
 
 **Beyond pytest.** `falsetto.check_callable(fn, declaration)` grades a plain callable with the same four verdicts, for a bespoke harness. Its default expectation is `AssertionError` alone; pass `default_expect=` to widen it. The pytest plugin is one adapter over that core; nothing else computes a verdict.
 
 ## What Falsetto needs from your tests
 
-- **Repeatability.** A declared check runs three times. A check whose second run fails on its own, because it counts calls at module level or consumes something shared, is reported unproven with a hint, never proven. Residue that first appears on the third run is not caught.
+- **Repeatability.** A declared check runs three times. A check whose second run fails on its own, because it counts calls at module level or consumes something shared, is reported unproven with a hint, never proven. Residue that first appears on the third run is credited to the change and reported proven; `--falsetto-controls 2`, or the `falsetto_controls` ini key, adds a control run and catches it at the cost of a fourth run.
 - **Changes through the handle.** A declaration that mutates state without the handle is not reverted, and its damage lands on a later test.
 - **Names looked up at call time.** Patching `module.function` does not reach a name the test copied in with `from module import function`. The hint on a false verdict says so.
 
-Costs to know about: a declared check takes about three times as long, `--durations` reports the first run only, `tmp_path` yields a fresh directory per run, and the control and negative runs are kept out of coverage measurement so a stub cannot inflate it. Falsetto grades function-based checks, including `unittest.TestCase` methods. Doctests and custom item types are left to pytest and counted as not gradable. Plugins that replace the run protocol, such as rerun plugins, do not run while Falsetto is enabled, and Falsetto warns at startup when it finds one.
+Costs to know about: a declared check takes about three times as long, `--durations` reports the first run only, `tmp_path` yields a fresh directory per run, and the control and negative runs are kept out of coverage measurement so a stub cannot inflate it. A timeout plugin that arms one budget per test protocol spends it across all runs; pytest-timeout's `timeout_func_only` setting gives each run its own. `--pdb` and `--trace` stay closed during the control and negative runs, but other consumers of pytest's exception-interaction hook still see the deliberate failure. Falsetto grades function-based checks, including `unittest.TestCase` methods. Doctests and custom item types are left to pytest and counted as not gradable. Plugins that also take over the run protocol, such as rerun plugins, compete with Falsetto for each check, and whichever pytest calls first wins; Falsetto names them in a warning at startup and reports the checks they ran as not graded, never as passes.
 
 ## Status
 

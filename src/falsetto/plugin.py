@@ -1,7 +1,7 @@
 """The pytest adapter.
 
 For a declared check it runs whole, unlogged pytest protocols (setup, call, teardown):
-the positive run, then a control run, then the negative run with the declared change
+the positive run, then the control runs, then the negative run with the declared change
 applied before setup. Every run of a check tears fixtures down to the same boundary,
 the one the declaration's scope names, so a verdict never depends on what pytest
 happens to run next. Each run is observed through its reports and handed to
@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import site
+import sysconfig
 import traceback
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 import pytest
 
@@ -43,6 +45,7 @@ if TYPE_CHECKING:
 
 PROPERTY = "falsetto.verdict"
 EXCLUDED_PROPERTY = "falsetto.excluded"
+GRADABLE_PROPERTY = "falsetto.gradable"
 MARKER = "no_proof"
 DEFAULT_EXPECT: tuple[type[BaseException], ...] = (AssertionError, pytest.fail.Exception)
 PASSTHROUGH: tuple[type[BaseException], ...] = (
@@ -52,6 +55,12 @@ PASSTHROUGH: tuple[type[BaseException], ...] = (
 )
 _SCOPE_RANK = {"function": 0, "class": 1, "module": 2, "package": 3, "session": 4}
 _EVIDENCE_LINES = 12
+_DEBUGGER_PLUGINS = ("pdbinvoke", "pdbtrace")
+
+# What runtestprotocol's teardown tears down to. pytest types it as an Item, but the
+# only thing consulted is `.listchain()`, which every node has, so a Collector marks
+# "keep this scope and above alive" and None means "everything down".
+TeardownTarget: TypeAlias = "pytest.Item | pytest.Collector | None"
 
 
 @dataclass(frozen=True)
@@ -59,10 +68,12 @@ class Settings:
     enabled: bool
     strict: bool
     json_path: str | None
+    controls: int = 1
 
 
 SETTINGS = pytest.StashKey[Settings]()
 EXCINFO = pytest.StashKey[Any]()
+FIXTURES = pytest.StashKey[tuple[str, ...]]()
 
 
 def _settings(config: pytest.Config) -> Settings:
@@ -157,10 +168,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         metavar="PATH",
         help="Write a JSON report of every verdict to PATH.",
     )
+    group.addoption(
+        "--falsetto-controls",
+        default=None,
+        dest="falsetto_controls",
+        type=int,
+        metavar="N",
+        help="Control runs before the negative run (default 1; N catches residue up to run N+1).",
+    )
     parser.addini("falsetto", "Enable Falsetto grading.", type="bool", default=False)
     parser.addini(
         "falsetto_strict", "Count unproven checks as failures.", type="bool", default=False
     )
+    parser.addini("falsetto_controls", "Control runs before the negative run.", default="1")
 
 
 def _warn_competing_protocols(config: pytest.Config) -> None:
@@ -175,8 +195,9 @@ def _warn_competing_protocols(config: pytest.Config) -> None:
     if others:
         config.issue_config_time_warning(
             pytest.PytestWarning(
-                "falsetto runs the test protocol itself; these plugins also implement "
-                f"pytest_runtest_protocol and will not run while falsetto is enabled: {others}"
+                "falsetto and these plugins both take over the test protocol, and whichever "
+                f"pytest calls first wins for each check: {others}. Checks they run are "
+                "reported as not graded, never as a pass."
             ),
             stacklevel=2,
         )
@@ -190,11 +211,22 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     strict = bool(config.getoption("falsetto_strict") or _ini(config, "falsetto_strict"))
     enabled = bool(config.getoption("falsetto") or _ini(config, "falsetto") or strict)
-    settings = Settings(enabled, strict, config.getoption("falsetto_json"))
+    controls = config.getoption("falsetto_controls")
+    if controls is None:
+        controls = int(config.getini("falsetto_controls") or 1)
+    settings = Settings(enabled, strict, config.getoption("falsetto_json"), max(1, controls))
     config.stash[SETTINGS] = settings
     if enabled:
         config.pluginmanager.register(_Session(settings, config), "falsetto-session")
         _warn_competing_protocols(config)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if not _settings(config).enabled:
+        return
+    for item in items:
+        if _gradable(item):
+            item.user_properties.append((GRADABLE_PROPERTY, "1"))
 
 
 @pytest.hookimpl(wrapper=True)
@@ -204,6 +236,9 @@ def pytest_runtest_makereport(
     report = yield
     if call.when == "call" and _settings(item.config).enabled:
         item.stash[EXCINFO] = call.excinfo
+        request = getattr(item, "_request", None)
+        names = getattr(request, "fixturenames", None) if request else None
+        item.stash[FIXTURES] = tuple(names) if names else ()
     return report
 
 
@@ -247,33 +282,82 @@ def _text(report: pytest.TestReport) -> str:
     return report.longreprtext[-core.EVIDENCE_LIMIT :]
 
 
-def _boundary(item: pytest.Item, scope: str) -> Any:
+def _scope_applies(item: pytest.Item, scope: str) -> str | None:
+    """Why the declaration's scope cannot apply to this check, or None when it can."""
+    if scope == "class" and not any(isinstance(n, pytest.Class) for n in item.listchain()):
+        return "the declaration says scope='class' but the check is not in a class"
+    return None
+
+
+def _boundary(item: pytest.Item, scope: str) -> TeardownTarget:
     """The node whose chain marks what stays set up between runs of this check."""
     if scope == "session":
         return None
     if scope == "function":
-        return item.parent
-    kind: type[pytest.Collector] = pytest.Class if scope == "class" else pytest.Module
+        return cast(TeardownTarget, item.parent)
+    kinds: dict[str, type[pytest.Collector]] = {
+        "class": pytest.Class,
+        "module": pytest.Module,
+        "package": pytest.Package,
+    }
+    kind = kinds[scope]
     for node in reversed(item.listchain()):
         if isinstance(node, kind):
-            return node.parent
-    return item.parent
+            return cast(TeardownTarget, node.parent)
+    return cast(TeardownTarget, item.parent)
+
+
+def _site_dirs() -> tuple[str, ...]:
+    dirs: set[str] = set()
+    with contextlib.suppress(Exception):
+        dirs.update(site.getsitepackages())
+        dirs.add(site.getusersitepackages())
+    paths = sysconfig.get_paths()
+    dirs.update(paths[k] for k in ("purelib", "platlib", "stdlib", "platstdlib") if k in paths)
+    return tuple(str(Path(d).resolve()) for d in dirs if d)
+
+
+_SITE_DIRS = _site_dirs()
+
+
+def _is_infrastructure(fixturedef: Any) -> bool:
+    """A fixture pytest or an installed plugin defines, not one the suite wrote."""
+    func = getattr(fixturedef, "func", None)
+    module = str(getattr(func, "__module__", "") or "")
+    if module.startswith("_pytest.") or module == "pytest":
+        return True
+    filename = str(getattr(getattr(func, "__code__", None), "co_filename", "") or "")
+    if not filename:
+        return False
+    return str(Path(filename).resolve()).startswith(_SITE_DIRS)
 
 
 def _wider_fixtures(item: pytest.Item, scope: str) -> list[str]:
-    """Fixtures the check requests directly whose scope the declaration does not rebuild."""
+    """Fixtures the check used, by any route, that the declaration's scope does not rebuild.
+
+    Fixtures defined by pytest or installed plugins are infrastructure and never count.
+    """
     info = getattr(item, "_fixtureinfo", None)
     if info is None:
         return []
+    name2defs = dict(getattr(info, "name2fixturedefs", {}))
+    requested = item.stash.get(FIXTURES, cast(tuple[str, ...], ()))
+    names = set(getattr(info, "names_closure", ())) | set(requested)
+    names |= set(name2defs)
     limit = _SCOPE_RANK.get(scope, 0)
     found = []
-    for name in getattr(info, "argnames", ()):
-        defs = getattr(info, "name2fixturedefs", {}).get(name) or ()
+    for name in sorted(names):
+        defs = name2defs.get(name)
+        if not defs:
+            with contextlib.suppress(Exception):
+                defs = item.session._fixturemanager.getfixturedefs(name, item)
         if not defs:
             continue
-        fixture_scope = str(getattr(defs[-1], "scope", "function"))
-        if _SCOPE_RANK.get(fixture_scope, 0) > limit:
-            found.append(f"{name} ({fixture_scope}-scoped)")
+        fixturedef = defs[-1]
+        fixture_scope = str(getattr(fixturedef, "scope", "function"))
+        if _SCOPE_RANK.get(fixture_scope, 0) <= limit or _is_infrastructure(fixturedef):
+            continue
+        found.append(f"{name} ({fixture_scope}-scoped)")
     return found
 
 
@@ -289,11 +373,26 @@ def _coverage_paused() -> Iterator[None]:
     if cov is None:
         yield
         return
-    cov.stop()
     try:
+        cov.stop()
         yield
     finally:
         cov.start()
+
+
+@contextlib.contextmanager
+def _debuggers_paused(config: pytest.Config) -> Iterator[None]:
+    """Keep --pdb and --trace from opening on the failure a graded run deliberately causes."""
+    pm = config.pluginmanager
+    paused = [(name, pm.get_plugin(name)) for name in _DEBUGGER_PLUGINS]
+    paused = [(name, plugin) for name, plugin in paused if plugin is not None]
+    for _, plugin in paused:
+        pm.unregister(plugin)
+    try:
+        yield
+    finally:
+        for name, plugin in paused:
+            pm.register(plugin, name)
 
 
 def _marker_reason(item: pytest.Item) -> str | None:
@@ -308,20 +407,23 @@ def _marker_reason(item: pytest.Item) -> str | None:
 def _grade(
     item: pytest.Item,
     reports: list[pytest.TestReport],
-    boundary: Any,
+    boundary: TeardownTarget,
     decl: Declaration | None,
     reason: str | None,
+    settings: Settings,
 ) -> Result | None:
     observe, protocol = _observe, runtestprotocol
-    positive = observe(item, reports, graded_run=False)
-    if positive is None:
-        return None
     if reason is not None and not reason:
         return core.misconfigured("the no_proof marker carries no reason", decl)
     if reason is not None and decl is not None:
         return core.misconfigured(
             "the no_proof marker and a declaration contradict each other", decl
         )
+    if decl is not None and (why := _scope_applies(item, decl.scope)) is not None:
+        return core.misconfigured(why, decl)
+    positive = observe(item, reports, graded_run=False)
+    if positive is None:
+        return None
     if reason is not None:
         for report in reports:
             if report.when in ("call", "teardown"):
@@ -331,8 +433,9 @@ def _grade(
         return core.prove(lambda: positive, None, positive)
 
     def run() -> RunResult:
-        with _coverage_paused():
-            observed = observe(item, protocol(item, log=False, nextitem=boundary), graded_run=True)
+        with _coverage_paused(), _debuggers_paused(item.config):
+            reports = protocol(item, log=False, nextitem=cast(Any, boundary))
+            observed = observe(item, reports, graded_run=True)
         if observed is None:
             return RunResult(Outcome.ERRORED, summary="the run produced no gradable call report")
         return observed
@@ -344,43 +447,13 @@ def _grade(
         default_expect=DEFAULT_EXPECT,
         passthrough=PASSTHROUGH,
         wider_fixtures=_wider_fixtures(item, decl.scope),
+        controls=settings.controls,
     )
 
 
-def _teardown_to(item: pytest.Item, nextitem: pytest.Item | None) -> pytest.TestReport | None:
-    """Tear the fixture stack down to what the real next item needs, as pytest would have.
-
-    The graded runs tore down only to the declaration's boundary. This is the teardown
-    pytest's own hook performs, done directly so per-phase plugin state is not re-entered;
-    a failure becomes a teardown report so it is never silent.
-    """
-    state = getattr(item.session, "_setupstate", None)
-    try:
-        if state is not None:
-            state.teardown_exact(nextitem)
-        else:  # pragma: no cover - only if pytest renames its setup state
-            item.ihook.pytest_runtest_teardown(item=item, nextitem=nextitem)
-    except PASSTHROUGH:
-        raise
-    except BaseException as e:
-        text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-        return pytest.TestReport(
-            item.nodeid,
-            item.location,
-            {},
-            "failed",
-            f"teardown after grading failed:\n{text}",
-            "teardown",
-            [],
-            0.0,
-            0.0,
-            0.0,
-        )
-    return None
-
-
 def _fails_build(result: Result, strict: bool) -> bool:
-    if result.reason is Reason.INTERNAL_ERROR or result.verdict is Verdict.FALSE:
+    always = (Reason.INTERNAL_ERROR, Reason.OUT_OF_SCOPE, Reason.MISCONFIGURED)
+    if result.reason in always or result.verdict is Verdict.FALSE:
         return True
     return strict and result.verdict is Verdict.UNPROVEN
 
@@ -393,7 +466,12 @@ def _longrepr(result: Result, item: pytest.Item) -> str:
             "falsetto: internal error while grading this check; its verdict is unproven.\n"
             f"{result.evidence or result.detail or ''}"
         )
-    head = "FALSE" if result.verdict is Verdict.FALSE else "UNPROVEN (strict)"
+    if result.verdict is Verdict.FALSE:
+        head = "FALSE"
+    elif result.reason in (Reason.OUT_OF_SCOPE, Reason.MISCONFIGURED):
+        head = f"UNPROVEN ({result.reason.value})"
+    else:
+        head = "UNPROVEN (strict)"
     lines = [f"{head}: {result.message}.", f"  at: {where}"]
     if result.declared:
         lines.append(f"  declared: {result.declared}")
@@ -433,6 +511,51 @@ def _attach(
     target.longrepr = _combine(existing, _longrepr(result, item))
 
 
+def _stopping(item: pytest.Item, reports: list[pytest.TestReport]) -> bool:
+    """Whether the session will stop after this item, as pytest decides once it is logged."""
+    session = item.session
+    if session.shouldstop or session.shouldfail:
+        return True
+    maxfail = item.config.getvalue("maxfail")
+    failures = sum(1 for r in reports if r.failed and not _is_xfail(r))
+    return bool(maxfail) and session.testsfailed + failures >= maxfail
+
+
+def _teardown_to(item: pytest.Item, nextitem: TeardownTarget) -> str | None:
+    """Tear the fixture stack down to what the real next item needs, as pytest would have.
+
+    The graded runs tore down only to the declaration's boundary. This is the teardown
+    pytest's own hook performs, done directly so per-phase plugin state is not re-entered;
+    a failure is returned as text so the caller can put it on the teardown report.
+    """
+    state = getattr(item.session, "_setupstate", None)
+    try:
+        if state is not None:
+            state.teardown_exact(nextitem)
+        else:  # pragma: no cover - only if pytest renames its setup state
+            item.ihook.pytest_runtest_teardown(item=item, nextitem=nextitem)
+    except PASSTHROUGH:
+        raise
+    except BaseException as e:
+        text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+        return f"teardown after grading failed:\n{text}"
+    return None
+
+
+def _report_teardown_failure(
+    item: pytest.Item, reports: list[pytest.TestReport], text: str
+) -> None:
+    teardown = next((r for r in reports if r.when == "teardown"), None)
+    if teardown is None:
+        teardown = pytest.TestReport(
+            item.nodeid, item.location, {}, "passed", None, "teardown", [], 0.0, 0.0, 0.0
+        )
+        reports.append(teardown)
+    existing = teardown.longreprtext if teardown.longrepr is not None else ""
+    teardown.outcome = "failed"
+    teardown.longrepr = _combine(existing, text)
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> bool | None:
     config = item.config
@@ -441,28 +564,30 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
         return None
     ihook = item.ihook
     decl = None
-    extra: list[pytest.TestReport] = []
     try:
         decl = get_declaration(getattr(item, "obj", None))
         reason = _marker_reason(item)
         declared = decl is not None and reason is None
-        boundary = _boundary(item, decl.scope) if declared and decl is not None else nextitem
+        boundary: TeardownTarget = nextitem
+        if declared and decl is not None and _scope_applies(item, decl.scope) is None:
+            boundary = _boundary(item, decl.scope)
         ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
         reports = runtestprotocol(item, log=False, nextitem=cast(Any, boundary))
         try:
-            result = _grade(item, reports, boundary, decl, reason)
+            result = _grade(item, reports, boundary, decl, reason, settings)
         except PASSTHROUGH:
             raise
         except BaseException as e:
             result = core.internal_error(e, decl)
-        if declared:
-            failure = _teardown_to(item, nextitem)
+        _attach(item, reports, result, settings)
+        if boundary is not nextitem:
+            final: TeardownTarget = None if _stopping(item, reports) else nextitem
+            failure = _teardown_to(item, final)
             if failure is not None:
-                extra.append(failure)
+                _report_teardown_failure(item, reports, failure)
     finally:
         item.stash[EXCINFO] = None
-    _attach(item, reports, result, settings)
-    for report in [*reports, *extra]:
+    for report in reports:
         ihook.pytest_runtest_logreport(report=report)
     ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
     return True
@@ -495,11 +620,20 @@ def _status_for(info: dict[str, Any], report: pytest.TestReport) -> tuple[str, s
     return None
 
 
+NOT_GRADED_BY_FALSETTO = "not graded (another plugin ran the protocol)"
+
+
+def _is_gradable(report: pytest.TestReport) -> bool:
+    """Whether the item behind a report was one Falsetto would have graded."""
+    return _last_property(report, GRADABLE_PROPERTY) is not None
+
+
 @dataclass
 class _Entry:
     status: str = "incomplete"
     record: dict[str, Any] | None = None
     excluded: str | None = None
+    teardown_failed: bool = False
 
 
 @dataclass
@@ -520,21 +654,21 @@ class Tally:
         if record is not None:
             entry.record = record
             entry.status = "graded"
-            return
-        reason = excluded_reason(report)
-        if reason is not None:
-            entry.excluded = reason
+        elif excluded_reason(report) is not None:
+            entry.excluded = excluded_reason(report)
             entry.status = "excluded"
-            return
-        if report.when == "call":
+        elif report.when == "call":
             if _is_xfail(report):
                 entry.status = "xfail"
             elif report.skipped:
                 entry.status = "skipped"
             elif entry.status == "incomplete":
-                entry.status = "not gradable"
-        elif report.failed and entry.status in ("incomplete", "not gradable"):
-            entry.status = "errored"
+                entry.status = NOT_GRADED_BY_FALSETTO if _is_gradable(report) else "not gradable"
+        if report.when == "teardown" and report.failed:
+            if entry.record is not None:
+                entry.teardown_failed = True
+            elif entry.status in ("incomplete", "not gradable", NOT_GRADED_BY_FALSETTO):
+                entry.status = "errored"
 
     def verdicts(self) -> dict[str, int]:
         counts = {v.value: 0 for v in Verdict}
@@ -547,6 +681,9 @@ class Tally:
         counts: dict[str, int] = {}
         for entry in self.items.values():
             counts[entry.status] = counts.get(entry.status, 0) + 1
+        teardowns = sum(1 for e in self.items.values() if e.teardown_failed)
+        if teardowns:
+            counts["teardown failed after grading"] = teardowns
         return counts
 
     @property
@@ -557,16 +694,19 @@ class Tally:
     def graded(self) -> int:
         return sum(1 for e in self.items.values() if e.record is not None)
 
-    def line(self) -> str:
+    def line(self, stopped: str | None = None) -> str:
         v = self.verdicts()
         extras = ", ".join(
             f"{n} {status}" for status, n in self.statuses().items() if status != "graded" and n
         )
         tail = f"{self.graded} graded of {self.run} run" + (f"; {extras}" if extras else "")
-        return (
+        text = (
             f"falsetto: {v['proven']} proven, {v['failed']} failed as written, "
             f"{v['false']} false, {v['unproven']} unproven ({tail})"
         )
+        if stopped:
+            text += f" - stopped early: {stopped}"
+        return text
 
 
 class _Session:
@@ -576,9 +716,20 @@ class _Session:
         self.settings = settings
         self.config = config
         self.tally = Tally()
+        self.session: pytest.Session | None = None
+
+    def pytest_sessionstart(self, session: pytest.Session) -> None:
+        self.session = session
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         self.tally.note(report)
+
+    def stopped(self) -> str | None:
+        session = self.session
+        if session is None:
+            return None
+        reason = session.shouldfail or session.shouldstop
+        return str(reason) if reason else None
 
     def strict_zero_graded(self) -> bool:
         if _runs_nothing(self.config):
@@ -596,10 +747,8 @@ class _Session:
             if entry.status == "excluded":
                 tr.write_line(f"EXCLUDED {nodeid}: {entry.excluded}")
             record = entry.record
-            if record is None or record["verdict"] not in (
-                Verdict.FALSE.value,
-                Verdict.UNPROVEN.value,
-            ):
+            non_green = (Verdict.FALSE.value, Verdict.UNPROVEN.value)
+            if record is None or record["verdict"] not in non_green:
                 continue
             word = "FALSE" if record["verdict"] == Verdict.FALSE.value else "UNPROVEN"
             if record["reason"] == Reason.INTERNAL_ERROR.value:
@@ -614,7 +763,7 @@ class _Session:
                     tr.write_line(f"    | {line}")
         if self.strict_zero_graded():
             tr.write_line("falsetto: strict: no check was graded", red=True)
-        tr.write_line(tally.line())
+        tr.write_line(tally.line(self.stopped()))
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
@@ -624,23 +773,29 @@ class _Session:
             session.exitstatus = int(pytest.ExitCode.TESTS_FAILED)
         if self.settings.json_path:
             try:
-                self.write_json(Path(self.settings.json_path))
+                self.write_json(Path(self.settings.json_path), session)
             except OSError as e:
                 tr = session.config.pluginmanager.get_plugin("terminalreporter")
                 if tr is not None:
                     tr.write_line(f"falsetto: could not write the JSON report: {e}", red=True)
+                if session.exitstatus == 0:
+                    session.exitstatus = int(pytest.ExitCode.INTERNAL_ERROR)
 
-    def write_json(self, path: Path) -> None:
+    def write_json(self, path: Path, session: pytest.Session) -> None:
         tally = self.tally
+        stopped = self.stopped()
         payload = {
             "falsetto": __version__,
+            "complete": stopped is None,
+            "stopped": stopped,
+            "exitstatus": int(session.exitstatus),
             "totals": {
                 **tally.verdicts(),
                 "graded": tally.graded,
                 "run": tally.run,
                 **tally.statuses(),
             },
-            "line": tally.line(),
+            "line": tally.line(stopped),
             "checks": [
                 {"nodeid": nodeid, **entry.record}
                 for nodeid, entry in tally.items.items()

@@ -53,7 +53,8 @@ MESSAGES: dict[Reason, str] = {
     Reason.NOT_REPEATABLE: "did not pass when run again without the change, so no failure can be "
     "attributed to the change",
     Reason.OUT_OF_SCOPE: "still passed under the declared change, but it uses fixtures of a wider "
-    "scope than the declaration rebuilds, so the change may never have reached them",
+    "scope than the declaration rebuilds, so the change may never have reached them and the "
+    "check may be false",
     Reason.MISCONFIGURED: "the declaration or the no_proof marker is misconfigured",
     Reason.INTERNAL_ERROR: "Falsetto itself raised while grading this check",
 }
@@ -75,13 +76,19 @@ HINTS: dict[Reason, str] = {
     ),
     Reason.NOT_REPEATABLE: (
         "Make the check repeatable: build its state in fixtures rather than at module level, "
-        "and do not depend on the order or count of runs."
+        "and do not depend on the order or count of runs. If the control run timed out, give "
+        "each run its own budget (pytest-timeout's timeout_func_only) rather than one budget "
+        "for all runs."
     ),
     Reason.OUT_OF_SCOPE: (
-        "Pass scope='module' or scope='session' on the declaration so those fixtures are "
-        "rebuilt under the change, or make the check read the subject directly."
+        "Widen scope= on the declaration so those fixtures are rebuilt under the change, or "
+        "make the check read the subject directly. Until then this check fails the build: it "
+        "cannot be graded under its declaration."
     ),
-    Reason.MISCONFIGURED: "Give no_proof a reason, and do not combine it with a declaration.",
+    Reason.MISCONFIGURED: (
+        "Give no_proof a reason, do not combine it with a declaration, and use a scope the "
+        "check can have."
+    ),
     Reason.INTERNAL_ERROR: "This is a bug in Falsetto or in a hook it called. Please report it.",
 }
 

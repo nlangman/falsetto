@@ -279,7 +279,7 @@ def test_a_competing_protocol_plugin_is_named_in_a_warning(pytester: pytest.Pyte
     pytester.makeconftest(COMPETING_CONFTEST)
     pytester.makepyfile(FALSE_THEN_PROVEN)
     result = pytester.runpytest(*RUN)
-    assert "will not run while falsetto is enabled" in result.stdout.str()
+    assert "both take over the test protocol" in result.stdout.str()
 
 
 STATS_CONFTEST = """

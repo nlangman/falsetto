@@ -12,6 +12,7 @@ import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from .declaration import Declaration, ExceptionTypes
 from .patching import Patch
@@ -52,9 +53,18 @@ def describe_exception(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {first}"[:300]
 
 
+_PACKAGE_DIR = str(Path(__file__).resolve().parent)
+
+
 def location_of(exc: BaseException) -> str | None:
-    tb = traceback.extract_tb(exc.__traceback__)
-    return f"{tb[-1].filename}:{tb[-1].lineno}" if tb else None
+    """The innermost frame outside Falsetto itself: the author's own line."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    if not frames:
+        return None
+    for frame in reversed(frames):
+        if not str(Path(frame.filename).resolve()).startswith(_PACKAGE_DIR):
+            return f"{frame.filename}:{frame.lineno}"
+    return f"{frames[-1].filename}:{frames[-1].lineno}"
 
 
 def _evidence(text: str) -> str:
@@ -87,15 +97,17 @@ def prove(
     default_expect: ExceptionTypes = DEFAULT_EXPECT,
     passthrough: Passthrough = PASSTHROUGH,
     wider_fixtures: Sequence[str] = (),
+    controls: int = 1,
 ) -> Result | None:
     """Grade a check whose positive run has already happened.
 
-    Order: the control run first (the check again, unchanged, which must pass), then
-    the negative run under the declared change. A control run second catches every
-    check that does not pass on its second execution, before a failure could be
-    credited to the change. ``wider_fixtures`` names fixtures the check uses that the
-    declaration's scope does not rebuild; when the negative run passes and there are
-    any, the verdict is unproven, never false.
+    Order: ``controls`` control runs first (the check again, unchanged, each of which
+    must pass), then the negative run under the declared change. One control run
+    catches every check that does not pass on its second execution, before a failure
+    could be credited to the change; ``k`` control runs catch residue that first
+    appears up to execution ``k + 1``. ``wider_fixtures`` names fixtures the check
+    uses that the declaration's scope does not rebuild; when the negative run passes
+    and there are any, the verdict is unproven and out of scope, never false.
 
     Returns None when the positive run neither passed nor failed, because then there
     is no check to grade.
@@ -108,10 +120,14 @@ def prove(
     if decl is None:
         return Result(Verdict.UNPROVEN, Reason.UNDECLARED)
 
-    control = run()
-    if control.outcome is not Outcome.PASSED:
-        detail = _detail(control, f"control run {control.outcome.value}")
-        return Result(Verdict.UNPROVEN, Reason.NOT_REPEATABLE, declared, detail, control.longrepr)
+    for n in range(max(1, controls)):
+        control = run()
+        if control.outcome is not Outcome.PASSED:
+            which = f"control run {n + 1} {control.outcome.value}"
+            detail = _detail(control, which)
+            return Result(
+                Verdict.UNPROVEN, Reason.NOT_REPEATABLE, declared, detail, control.longrepr
+            )
 
     with Patch() as patch:
         try:
