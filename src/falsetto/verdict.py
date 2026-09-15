@@ -1,14 +1,23 @@
+"""The four verdicts and the record a check receives."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 
 class Verdict(str, Enum):
-    PROVEN = "proven"      # passed as written, failed under the declared change
-    FAILED = "failed"      # failed as written: an ordinary red check
-    FALSE = "false"        # passed as written, still passed under the change: the check is wrong
-    UNPROVEN = "unproven"  # no declaration, or failed under the change for another reason
+    """What is known about a check after the two runs."""
+
+    PROVEN = "proven"
+    """Passed as written, and failed under the declared change."""
+    FAILED = "failed"
+    """Failed as written: an ordinary red check."""
+    FALSE = "false"
+    """Passed as written, and still passed under the change: the check is wrong."""
+    UNPROVEN = "unproven"
+    """No declaration, or failed under the change for a reason other than the one declared."""
 
 
 HINTS = {
@@ -27,13 +36,16 @@ HINTS = {
 
 @dataclass(frozen=True)
 class Result:
+    """The verdict for one check, with the reason and, for non-green verdicts, a hint."""
+
     verdict: Verdict
     reason: str
     declared: str | None = None
     hint: str | None = None
     detail: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
+        """A plain, serializable record of this result."""
         return {
             "verdict": self.verdict.value,
             "reason": self.reason,

@@ -1,7 +1,8 @@
 """Four checks, one per verdict. Run: pytest examples/router"""
 
-import falsetto
 import router
+
+import falsetto
 
 _original_pick_route = router.pick_route
 

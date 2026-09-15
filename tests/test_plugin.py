@@ -28,7 +28,7 @@ def leak_the_negative_run(m):
     m.setattr(pytest.MonkeyPatch, "context", staticmethod(_leaky_context))
 
 
-FOUR = '''
+FOUR = """
 import falsetto
 
 VALUE = {"key": "k1"}
@@ -50,7 +50,7 @@ def test_false():
 
 def test_unproven():
     assert read_key() == "k1"
-'''
+"""
 
 
 @falsetto.must_fail_when(stub_prove_all_proven)
@@ -65,10 +65,10 @@ def test_four_verdicts(pytester):
     assert result.ret == 1
 
 
-UNDECLARED = '''
+UNDECLARED = """
 def test_passes():
     assert True
-'''
+"""
 
 
 @falsetto.must_fail_when(stub_prove_all_proven)
@@ -81,7 +81,7 @@ def test_strict_counts_unproven_as_failure(pytester):
     assert strict.ret == 1
 
 
-WRONG_REASON = '''
+WRONG_REASON = """
 import falsetto
 
 def boom():
@@ -92,7 +92,7 @@ STATE = {"f": lambda: 1}
 @falsetto.must_fail_when(lambda m: m.setitem(STATE, "f", boom))
 def test_wrong_reason():
     assert STATE["f"]() == 1
-'''
+"""
 
 
 @falsetto.must_fail_when(stub_prove_all_proven)
@@ -104,7 +104,7 @@ def test_failure_for_another_reason_is_unproven(pytester):
     assert "expected AssertionError, got ValueError" in out
 
 
-EXPECTED_TYPE = '''
+EXPECTED_TYPE = """
 import falsetto
 
 def boom():
@@ -115,7 +115,7 @@ STATE = {"f": lambda: 1}
 @falsetto.must_fail_when(lambda m: m.setitem(STATE, "f", boom), expect=ValueError)
 def test_expect_value_error():
     assert STATE["f"]() == 1
-'''
+"""
 
 
 @falsetto.must_fail_when(stub_prove_all_unproven)
@@ -126,7 +126,7 @@ def test_expectation_can_name_an_exception_type(pytester):
     assert result.ret == 0
 
 
-REVERT = '''
+REVERT = """
 import falsetto
 
 STATE = {"key": "k1"}
@@ -137,7 +137,7 @@ def test_a_proven():
 
 def test_b_sees_the_original_after_the_negative_run():
     assert STATE["key"] == "k1"
-'''
+"""
 
 
 @falsetto.must_fail_when(leak_the_negative_run)
@@ -148,7 +148,7 @@ def test_negative_run_is_reverted(pytester):
     assert result.ret == 0
 
 
-NOT_APPLIED = '''
+NOT_APPLIED = """
 import falsetto
 
 def cannot(m):
@@ -157,7 +157,7 @@ def cannot(m):
 @falsetto.must_fail_when(cannot)
 def test_x():
     assert True
-'''
+"""
 
 
 @falsetto.must_fail_when(stub_prove_all_proven)
@@ -173,7 +173,12 @@ def test_declaration_that_cannot_apply_is_unproven(pytester):
 # declaration, and gets the same verdicts the pytest adapter gets.
 def stub_core_prove_all_proven(m):
     import falsetto.core as core
-    m.setattr(core, "prove", lambda run, decl, subject=None, passthrough=(): Result(Verdict.PROVEN, "stubbed", None))
+
+    m.setattr(
+        core,
+        "prove",
+        lambda run, decl, subject=None, passthrough=(): Result(Verdict.PROVEN, "stubbed", None),
+    )
 
 
 @falsetto.must_fail_when(stub_core_prove_all_proven)

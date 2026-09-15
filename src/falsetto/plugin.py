@@ -1,23 +1,71 @@
-"""The pytest adapter. It runs nothing of its own: the positive run is pytest's,
-the negative run and every verdict come from `falsetto.core`."""
+"""The pytest adapter.
+
+It runs nothing of its own: the positive run is pytest's, and the negative run and
+every verdict come from :mod:`falsetto.core`. Verdicts travel on the report's
+``user_properties`` as a JSON string, so they survive serialization and appear in
+JUnit output as one parseable property.
+"""
+
 from __future__ import annotations
+
+import json
+from collections.abc import Generator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from . import core
-from .declaration import get_declaration
+from .declaration import Declaration, get_declaration
 from .verdict import Result, Verdict
 
-RESULT = pytest.StashKey[Result]()
-_PASSTHROUGH = (pytest.skip.Exception, pytest.xfail.Exception, pytest.exit.Exception, KeyboardInterrupt, SystemExit)
-_NEGATIVE_PASSTHROUGH = (pytest.exit.Exception, KeyboardInterrupt, SystemExit)
+if TYPE_CHECKING:
+    from _pytest.terminal import TerminalReporter
+
+PROPERTY = "falsetto"
+_POSITIVE_PASSTHROUGH: tuple[type[BaseException], ...] = (
+    pytest.skip.Exception,
+    pytest.xfail.Exception,
+    pytest.exit.Exception,
+    KeyboardInterrupt,
+    SystemExit,
+)
+_NEGATIVE_PASSTHROUGH: tuple[type[BaseException], ...] = (
+    pytest.exit.Exception,
+    KeyboardInterrupt,
+    SystemExit,
+)
+_STATUS = {
+    Verdict.PROVEN.value: ("proven", ".", "PROVEN"),
+    Verdict.FALSE.value: ("false", "!", "FALSE"),
+    Verdict.UNPROVEN.value: ("unproven", "?", "UNPROVEN"),
+}
 
 
-def prove(item, decl):
-    return core.prove(item.runtest, decl, subject=item.obj, passthrough=_NEGATIVE_PASSTHROUGH)
+def _subject(item: pytest.Item) -> Any:
+    return getattr(item, "obj", None)  # only function-like items carry a test object
 
 
-def pytest_addoption(parser):
+def prove(item: pytest.Item, decl: Declaration | None) -> Result:
+    """The negative run for a pytest item, delegated to the core."""
+    return core.prove(item.runtest, decl, subject=_subject(item), passthrough=_NEGATIVE_PASSTHROUGH)
+
+
+def _record(item: pytest.Item, result: Result) -> None:
+    item.user_properties.append((PROPERTY, json.dumps(result.to_dict())))
+
+
+def verdict_of(report: pytest.TestReport) -> dict[str, Any] | None:
+    """The verdict record carried by a call-phase report, or None."""
+    if report.when != "call":
+        return None
+    for name, value in report.user_properties:
+        if name == PROPERTY and isinstance(value, str):
+            loaded = json.loads(value)
+            return loaded if isinstance(loaded, dict) else None
+    return None
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("falsetto")
     group.addoption(
         "--falsetto-strict",
@@ -28,70 +76,58 @@ def pytest_addoption(parser):
 
 
 @pytest.hookimpl(wrapper=True)
-def pytest_runtest_call(item):
-    decl = get_declaration(item.obj)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
+    decl = get_declaration(_subject(item))
     try:
         yield
-    except _PASSTHROUGH:
+    except _POSITIVE_PASSTHROUGH:
         raise
     except BaseException:
-        item.stash[RESULT] = Result(Verdict.FAILED, "positive run failed", decl.description if decl else None)
+        declared = decl.description if decl else None
+        _record(item, Result(Verdict.FAILED, "positive run failed", declared))
         raise
-    item.stash[RESULT] = prove(item, decl)
+    _record(item, prove(item, decl))
 
 
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_makereport(item, call):
-    report = yield
-    if call.when == "call" and RESULT in item.stash:
-        report.falsetto = item.stash[RESULT].to_dict()
-    return report
-
-
-def pytest_report_teststatus(report, config):
-    info = getattr(report, "falsetto", None)
-    if report.when != "call" or info is None:
+def pytest_report_teststatus(
+    report: pytest.TestReport, config: pytest.Config
+) -> tuple[str, str, str] | None:
+    info = verdict_of(report)
+    if info is None:
         return None
-    verdict = info["verdict"]
-    if verdict == Verdict.PROVEN.value:
-        return ("proven", ".", "PROVEN")
-    if verdict == Verdict.FALSE.value:
-        return ("false", "!", "FALSE")
-    if verdict == Verdict.UNPROVEN.value:
-        return ("unproven", "?", "UNPROVEN")
-    return None
+    return _STATUS.get(str(info["verdict"]))
 
 
-def _counts(stats) -> dict[str, int]:
+def _counts(stats: dict[str, list[Any]]) -> dict[str, int]:
     return {k: len(stats.get(k, [])) for k in ("proven", "failed", "false", "unproven")}
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_terminal_summary(terminalreporter, exitstatus, config):
+def pytest_terminal_summary(
+    terminalreporter: TerminalReporter, exitstatus: int, config: pytest.Config
+) -> None:
     tr = terminalreporter
     n = _counts(tr.stats)
     tr.write_sep("=", "falsetto")
     for key, word in (("false", "FALSE"), ("unproven", "UNPROVEN")):
         for rep in tr.stats.get(key, []):
-            info = rep.falsetto
+            info = verdict_of(rep) or {}
             tr.write_line(f"{word} {rep.nodeid}")
-            if info.get("declared"):
-                tr.write_line(f"    declared: {info['declared']}")
-            if info.get("detail"):
-                tr.write_line(f"    detail: {info['detail']}")
-            if info.get("hint"):
-                tr.write_line(f"    hint: {info['hint']}")
+            for field in ("declared", "detail", "hint"):
+                if info.get(field):
+                    tr.write_line(f"    {field}: {info[field]}")
     tr.write_line(
-        f"falsetto: {n['proven']} proven, {n['failed']} failed, {n['false']} false, {n['unproven']} unproven"
+        f"falsetto: {n['proven']} proven, {n['failed']} failed, "
+        f"{n['false']} false, {n['unproven']} unproven"
     )
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_sessionfinish(session, exitstatus):
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     tr = session.config.pluginmanager.get_plugin("terminalreporter")
     if tr is None:
         return
     n = _counts(tr.stats)
-    strict = session.config.getoption("--falsetto-strict")
+    strict = bool(session.config.getoption("--falsetto-strict"))
     if session.exitstatus == 0 and (n["false"] or (strict and n["unproven"])):
         session.exitstatus = int(pytest.ExitCode.TESTS_FAILED)

@@ -4,29 +4,66 @@ build-backend = "hatchling.build"
 
 [project]
 name = "falsetto"
-version = "0.0.1"
+dynamic = ["version"]
 description = "A test runner that refuses to count a check unless it can prove the check is capable of failing."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Nat Langman" }]
-dependencies = ["pytest>=8.0"]
+keywords = ["pytest", "testing", "mutation-testing", "falsifiability", "evals", "agents"]
 classifiers = [
-  "Framework :: Pytest",
   "Development Status :: 2 - Pre-Alpha",
+  "Framework :: Pytest",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Testing",
+  "Typing :: Typed",
 ]
+dependencies = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://github.com/nlangman/falsetto"
+Issues = "https://github.com/nlangman/falsetto/issues"
+Changelog = "https://github.com/nlangman/falsetto/blob/main/CHANGELOG.md"
 
 [project.entry-points.pytest11]
 falsetto = "falsetto.plugin"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.10"]
+
+[tool.hatch.version]
+path = "src/falsetto/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/falsetto"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--falsetto-strict"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["falsetto"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["src/falsetto"]

@@ -29,6 +29,7 @@ The shape as built. The decorator attaches the declaration to the function and r
 ```python
 import falsetto
 
+
 @falsetto.must_fail_when(
     lambda m: m.setattr(router, "pick_route", pick_route_dropping_thread_key),
 )

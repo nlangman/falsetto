@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    name: Falsetto's own checks (py${{ matrix.python }}, pytest ${{ matrix.pytest }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        pytest: ["8", "9"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync
+      - run: uv pip install "pytest~=${{ matrix.pytest }}.0"
+      - run: uv run --no-sync pytest --falsetto-strict
+      - name: The router example prints the promised verdict line
+        run: uv run --no-sync pytest examples/router -p no:cacheprovider | grep -q "falsetto: 1 proven, 1 failed, 1 false, 1 unproven"
+
+  lint-and-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
