@@ -13,8 +13,10 @@ class Patch:
     """The handle a declaration receives. Changes go through it so they revert.
 
     Use it as a context manager. Every change is recorded and undone in reverse
-    order when the block ends, whether or not the block raised. Anything changed
-    outside the handle is not reverted, and Falsetto cannot see it.
+    order when the block ends, whether or not the block raised. An undo step that
+    raises does not stop the others; the first error is raised after every step ran.
+    An attribute the target inherited is restored as inherited, not copied onto it.
+    Anything changed outside the handle is not reverted, and Falsetto cannot see it.
     """
 
     def __init__(self) -> None:
@@ -27,17 +29,30 @@ class Patch:
         self.undo()
 
     def undo(self) -> None:
-        """Undo every recorded change, most recent first."""
+        """Undo every recorded change, most recent first, even if some steps raise."""
+        errors: list[Exception] = []
         while self._undo:
-            self._undo.pop()()
+            step = self._undo.pop()
+            try:
+                step()
+            except Exception as e:
+                errors.append(e)
+        if errors:
+            if len(errors) == 1:
+                raise errors[0]
+            raise RuntimeError(
+                f"{len(errors)} undo steps failed; the first: {errors[0]!r}"
+            ) from errors[0]
 
     def setattr(self, target: object, name: str, value: object, raising: bool = True) -> None:
-        """Set ``target.name = value``; restore or delete it on undo."""
+        """Set ``target.name = value``; restore, or remove, it on undo."""
+        namespace = getattr(target, "__dict__", None)
+        own = namespace is None or name in namespace
         old = getattr(target, name, _MISSING)
         if old is _MISSING and raising:
             raise AttributeError(f"{target!r} has no attribute {name!r}")
         setattr(target, name, value)
-        if old is _MISSING:
+        if old is _MISSING or not own:
             self._undo.append(lambda: delattr(target, name))
         else:
             self._undo.append(lambda: setattr(target, name, old))
@@ -53,7 +68,7 @@ class Patch:
         self._undo.append(lambda: setattr(target, name, old))
 
     def setitem(self, mapping: MutableMapping[Any, Any], key: Any, value: Any) -> None:
-        """Set ``mapping[key] = value``; restore or delete it on undo."""
+        """Set ``mapping[key] = value``; restore, or remove, it on undo."""
         old = mapping.get(key, _MISSING)
         mapping[key] = value
         if old is _MISSING:

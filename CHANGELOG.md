@@ -22,7 +22,19 @@ All notable changes to Falsetto are recorded here. The format follows
 - A prior-art page: spec-verify, pytest-mutagen, extreme mutation, and the wider field.
 - Apache License 2.0.
 
+- `scope=` on the declaration: the fixture scopes rebuilt under the change, and the teardown
+  boundary for every run of the check.
+- Reason codes out-of-scope and misconfigured; evidence (the deciding run's failure text) on
+  every verdict record and in the summary.
+- Coverage measurement is paused during the control and negative runs.
+- A warning at startup naming plugins that also implement the run protocol.
+
 ### Changed
 - After review round one the negative run became a whole fresh protocol with the change
   applied before setup, and proven now requires a passing control run. The own-frame rule
   on assertions was dropped; `pytest.fail` counts as the stated reason by default.
+- After review round two the control run precedes the negative run, every run of a check
+  tears down to the declaration's boundary rather than to the session's next item, proven
+  and non-strict unproven keep pytest's `passed` category, the verdict line says "failed as
+  written", the verdict record is namespaced and read last-wins, a `no_proof` marker needs a
+  reason and is listed, and strict mode fails any session that graded nothing.

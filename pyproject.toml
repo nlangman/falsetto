@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project]
@@ -38,7 +38,7 @@ Changelog = "https://github.com/nlangman/falsetto/blob/main/CHANGELOG.md"
 falsetto = "falsetto.plugin"
 
 [dependency-groups]
-dev = ["ruff>=0.6", "mypy>=1.10", "pytest-xdist>=3.5"]
+dev = ["ruff>=0.6", "mypy>=1.10", "pytest-xdist>=3.5", "pytest-cov>=5.0"]
 
 [tool.hatch.version]
 path = "src/falsetto/__init__.py"

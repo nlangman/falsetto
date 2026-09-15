@@ -2,7 +2,7 @@
 
 **Green means nothing until it can go red.**
 
-Falsetto is a test runner that refuses to count a check unless it can prove the check is capable of failing. Agents write tests faster than anyone reads them. Falsetto runs each one twice, once as written and once with the bug it claims to catch, and only counts the ones that fail when they should.
+Falsetto is a test runner that refuses to count a check unless it can prove the check is capable of failing. Agents write tests faster than anyone reads them. Falsetto runs each one again with the bug it claims to catch, and once more without it, and only counts the ones that fail when they should.
 
 Test runners report two states: pass and fail. They hide a third: a test that cannot fail. It stays green because the thing it checks is missing on both sides, or the fixture is empty, or the assertion compares nothing to nothing. Such a test proves nothing, and it looks exactly like a test that proves everything. A falsetto is a voice that sounds high but is not the real voice. Falsetto finds the false voice in your suite, and screams.
 
@@ -33,23 +33,39 @@ A month later a colleague simplifies the shared fixture in another file, so `msg
 ## How it works
 
 1. **The declaration.** Every check declares one change to the **subject** (the code under test, its input, its fixture, or its environment) that must make the check fail. The change is ordinary code you write, applied through a patching handle that reverts everything afterwards. Nothing is generated, nothing is edited on disk, and no model is involved.
-2. **Three runs at most.** The check runs as written and must pass. It runs again under the declared change, as a whole fresh test (setup, call and teardown), and must fail with an assertion. If it did, it runs a third time without the change, and must pass again. That control run is what stops a check that fails on its own second execution from being credited to the change.
+2. **Three runs.** The check runs as written and must pass. It runs a second time, unchanged, as a whole fresh test with setup and teardown, and must pass again: that control run is what stops a check that fails on its own second execution from being credited to the change. Then it runs under the declared change, applied before setup, and must fail with an assertion.
 3. **Four verdicts.**
 
 | Verdict | Meaning |
 |---|---|
-| **proven** | Passed as written, failed under its declared change, and passed again without it. |
+| **proven** | Passed as written, passed again without the change, and failed under it. |
 | **failed** | Failed as written. An ordinary red check. |
 | **false** | Passed as written, and still passed under its declared change. The check is wrong. **This fails the build.** |
-| **unproven** | Nothing is known yet: no declaration, or the failure under the change could not be attributed to it. Fails the build in strict mode. |
+| **unproven** | Nothing is known yet: no declaration, or no failure could be attributed to the change. Fails the build in strict mode. |
+
+```mermaid
+flowchart TD
+    A[Positive run: the check as written] -->|failed| F[FAILED]
+    A -->|skipped or errored| N[No verdict: counted as skipped or errored]
+    A -->|passed| D{Declaration?}
+    D -->|none| U1[UNPROVEN: undeclared]
+    D -->|yes| C[Control run: fresh, unchanged]
+    C -->|did not pass| U2[UNPROVEN: not repeatable]
+    C -->|passed| P[Apply the declared change, then a fresh run under it]
+    P -->|could not apply| U3[UNPROVEN: not applied]
+    P -->|passed, and it uses fixtures wider than the declaration's scope| U4[UNPROVEN: out of scope]
+    P -->|passed| X[FALSE: fails the build]
+    P -->|skipped, errored, or an unexpected exception| U5[UNPROVEN: wrong reason]
+    P -->|failed for the stated reason| PR[PROVEN]
+```
 
 The verdict line carries its denominator, so a suite where nothing was graded can never read as a suite where everything was:
 
 ```
-falsetto: 12 proven, 1 failed, 2 false, 3 unproven (18 graded of 21 run; 2 skipped, 1 excluded)
+falsetto: 12 proven, 1 failed as written, 2 false, 3 unproven (18 graded of 21 run; 2 skipped, 1 excluded)
 ```
 
-A false check is a real pytest failure: stop-on-first-failure stops on it, `--lf` reruns it, JUnit output counts it, and the exit status reflects it.
+A false check is a real pytest failure: stop-on-first-failure stops on it, `--lf` reruns it, JUnit output counts it, and the exit status reflects it. A crash inside Falsetto is reported as Falsetto's crash, loudly, never as the check failing.
 
 ## Why now
 
@@ -79,27 +95,29 @@ falsetto = true
 falsetto_strict = true
 ```
 
-Falsetto is inert unless enabled. A check that cannot be proven on purpose, such as one that talks to a live service, is excluded with `@pytest.mark.no_proof("reason")`; it is counted as excluded in the verdict line and is never a pass.
+Falsetto is inert unless enabled. A check that cannot be proven on purpose, such as one that talks to a live service, is excluded with `@pytest.mark.no_proof("reason")`; the reason is required, the check is listed by name in the summary, it is counted as excluded in the verdict line, and it is never a pass. In strict mode a session that ran checks and graded none fails, whatever the reason.
 
-**The declaration.** `@falsetto.must_fail_when(change, *, expect=None, describe=None)`. `change` receives a handle with `setattr`, `setitem`, `delattr`, `delitem`, `setenv` and `delenv`; everything it does is undone after the run. By default the check must fail with an `AssertionError` or a `pytest.fail`; any other exception is "wrong reason", never proof. Pass `expect=SomeError` when the failure you mean is a different one. Pass `describe="..."` to name the change in reports.
+**The declaration.** `@falsetto.must_fail_when(change, *, expect=None, describe=None, scope="function")`. `change` receives a handle with `setattr`, `setitem`, `delattr`, `delitem`, `setenv` and `delenv`; everything it does is undone after the run. By default the check must fail with an `AssertionError` or a `pytest.fail`; any other exception is "wrong reason", never proof. Pass `expect=SomeError` when the failure you mean is a different one. Pass `describe="..."` to name the change in reports. `scope` says how deep the change reaches: which fixture scopes are rebuilt under it. The default rebuilds only the check's own function-scoped fixtures; a change that must reach a module- or session-scoped fixture says `scope="module"` or `scope="session"` and pays for the rebuild. A check that uses a wider fixture without saying so is never accused of being false; it is unproven, with the scope named.
 
-**Beyond pytest.** `falsetto.check_callable(fn, declaration)` grades a plain callable with the same verdicts, for a bespoke harness. The pytest plugin is one adapter over that core; nothing else computes a verdict.
+**Beyond pytest.** `falsetto.check_callable(fn, declaration)` grades a plain callable with the same four verdicts, for a bespoke harness. Its default expectation is `AssertionError` alone; pass `default_expect=` to widen it. The pytest plugin is one adapter over that core; nothing else computes a verdict.
 
 ## What Falsetto needs from your tests
 
-- **Repeatability.** A graded check runs up to three times. A check whose second run fails on its own, because it counts calls at module level or consumes something shared, is reported unproven with a hint, never proven.
+- **Repeatability.** A declared check runs three times. A check whose second run fails on its own, because it counts calls at module level or consumes something shared, is reported unproven with a hint, never proven. Residue that first appears on the third run is not caught.
 - **Changes through the handle.** A declaration that mutates state without the handle is not reverted, and its damage lands on a later test.
 - **Names looked up at call time.** Patching `module.function` does not reach a name the test copied in with `from module import function`. The hint on a false verdict says so.
 
-Falsetto grades function-based checks, including `unittest.TestCase` methods. Doctests and custom item types are left to pytest and counted as not gradable.
+Costs to know about: a declared check takes about three times as long, `--durations` reports the first run only, `tmp_path` yields a fresh directory per run, and the control and negative runs are kept out of coverage measurement so a stub cannot inflate it. Falsetto grades function-based checks, including `unittest.TestCase` methods. Doctests and custom item types are left to pytest and counted as not gradable. Plugins that replace the run protocol, such as rerun plugins, do not run while Falsetto is enabled, and Falsetto warns at startup when it finds one.
 
 ## Status
 
-Pre-alpha, installable from source. The design is in [docs/design.md](docs/design.md), the build plan in [docs/plan.md](docs/plan.md), and what came before in [docs/prior-art.md](docs/prior-art.md). The router example under `examples/router` prints one check per verdict:
+Pre-alpha, installable from source. The design is in [docs/design.md](docs/design.md), the execution path in [docs/how-it-works.md](docs/how-it-works.md), the build plan in [docs/plan.md](docs/plan.md), and what came before in [docs/prior-art.md](docs/prior-art.md). The router example under `examples/router` prints one check per verdict:
 
 ```
 pytest examples/router --falsetto
 ```
+
+Inside this repository the strict setting also applies, so the example's unproven check fails the build here; that is the repository's own standard, not a property of the example.
 
 ## Licence
 

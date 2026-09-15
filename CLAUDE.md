@@ -1,7 +1,7 @@
 # Falsetto: instructions for agent sessions
 
-Read `README.md` for the thesis, `docs/design.md` for the shape, `docs/plan.md` for the
-increment ledger. This file says how to work here.
+Read `README.md` for the thesis, `docs/design.md` for the shape, `docs/how-it-works.md` for
+the execution path, `docs/plan.md` for the increment ledger. This file says how to work here.
 
 ## The one rule
 
@@ -41,6 +41,12 @@ is proven". Three lessons the suite already paid for:
 - A conftest planted for a nested run must restore what it changes, in `pytest_unconfigure`.
 - A check that falsifies a revert must reset its own subject: use a class defined inside the
   check, not a module-level one.
+- A falsifier must change what the check observes. Under `--collect-only` nothing runs, so a
+  falsifier that patches grading cannot bite; patch what the summary reads instead. A zero
+  limit in a Python slice selects everything, so a "no evidence" falsifier needs an explicit
+  branch in the code it falsifies.
+- Under xdist, a falsifier patched in the controller does not reach the workers; falsify what
+  the controller reads back.
 
 ## Each increment
 

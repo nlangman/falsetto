@@ -7,6 +7,7 @@ Increments in order. Each names the check that proves it and leaves the tree gre
 | 0 | Founding: design record, this plan, a leak gate on commits and commit messages, proven red | The gate blocks a commit carrying a planted term and admits the founding docs | done |
 | 1 | Skeleton: declaration, runner-agnostic core, pytest adapter, verdict line, the router example, package metadata | `pytest examples/router --falsetto` prints `1 proven, 1 failed, 1 false, 1 unproven` | done |
 | 1b | The run seam, after review round one: whole-protocol runs with a control run, a pytest-free core with its own patch handle, opt-in by default, false checks as real failures, the denominator, loud internal errors, the JSON report, a test matrix over every class the reviewers broke | Falsetto's own suite is fully proven in strict mode; a check with a no-op declaration and its own residue is unproven, never proven | done |
+| 1c | The boundary, after review round two: the declaration's scope is the teardown boundary for every run; the control run precedes the negative run; out-of-scope instead of false when a wider fixture was not rebuilt; coverage paused during graded runs; internal errors loud without a call report; a forge-proof verdict record; evidence in reports; a draining, inheritance-aware patch handle | Two byte-identical checks over a module fixture are proven whether first or last; an alternating check is unproven; the own suite is fully proven | done |
 | 2 | Vacuity demo: the README example as a script that applies the fixture change and re-runs | The verdict line changes between the two fixture states | next |
 | 3 | Dogfood on our own suites | At least one confirmed false or unproven check found | |
 | 4 | Eval falsifier with a fake judge | A judge that scores garbage high reports the eval false | |
@@ -28,6 +29,8 @@ A small router application in `examples/router/` with four checks, one per verdi
 
 - Default for unproven: warning or failure. Strict recommended, and it is the repository's own setting.
 - A string form for `setattr` targets (`"pkg.mod.name"`), if real suites ask for it.
+- Autouse fixtures wider than the declaration's scope are not detected for the out-of-scope verdict; only fixtures the check requests directly are.
+- A dedicated contact address for the code of conduct before the flip.
 - Timing of the Swift Testing port.
 
 ## Release protocol

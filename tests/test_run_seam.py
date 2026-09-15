@@ -1,13 +1,44 @@
-"""The negative run is a whole fresh protocol, and proven needs a passing control run."""
+"""Every run of a check starts from the same boundary, and proven needs a control run."""
 
 from __future__ import annotations
 
 import pytest
 
 import falsetto
-from tests.helpers import RUN, changes_never_bite, everything_is_proven, no_control_run
+import falsetto.plugin as plugin
+from tests.helpers import (
+    RUN,
+    boundary_is_the_item,
+    boundary_is_the_session,
+    changes_never_bite,
+    line,
+    no_control_run,
+)
 
-NON_REPEATABLE = """
+ALTERNATING = """
+import falsetto
+
+STATE = {"n": 0}
+SUBJECT = {"key": "k1"}
+
+@falsetto.must_fail_when(lambda m: m.setitem(SUBJECT, "key", "BROKEN"),
+                         describe="subject key broken (this check never reads it)")
+def test_alternates():
+    STATE["n"] += 1
+    assert STATE["n"] % 2 == 1
+"""
+
+
+@falsetto.must_fail_when(no_control_run)
+def test_a_check_that_alternates_is_never_proven(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(ALTERNATING)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+    assert line(0, 0, 0, 1) in out
+    assert "no failure can be attributed to the change" in out
+
+
+MONOTONE = """
 import falsetto
 
 CALLS = []
@@ -21,12 +52,11 @@ def test_counts_its_own_calls():
 
 @falsetto.must_fail_when(no_control_run)
 def test_a_check_that_fails_on_rerun_is_never_proven(pytester: pytest.Pytester) -> None:
-    pytester.makepyfile(NON_REPEATABLE)
+    pytester.makepyfile(MONOTONE)
     result = pytester.runpytest(*RUN)
     out = result.stdout.str()
-    assert "0 proven" in out
-    assert "1 unproven" in out
-    assert "cannot be attributed to the change" in out
+    assert line(0, 0, 0, 1) in out
+    assert "control run failed" in out
 
 
 FIXTURE_TARGET = """
@@ -46,10 +76,10 @@ def test_ident_has_the_prefix(ident):
 
 
 @falsetto.must_fail_when(changes_never_bite)
-def test_a_change_applied_before_setup_reaches_fixtures(pytester: pytest.Pytester) -> None:
+def test_a_change_applied_before_setup_reaches_function_fixtures(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(FIXTURE_TARGET)
     result = pytester.runpytest(*RUN)
-    assert "1 proven, 0 failed, 0 false, 0 unproven" in result.stdout.str()
+    assert line(1, 0, 0, 0) in result.stdout.str()
     assert result.ret == 0
 
 
@@ -67,11 +97,108 @@ def test_consumes_the_queue(queue):
 """
 
 
-@falsetto.must_fail_when(everything_is_proven)
-def test_fixtures_are_fresh_so_residue_cannot_fake_a_failure(pytester: pytest.Pytester) -> None:
+@falsetto.must_fail_when(boundary_is_the_item)
+def test_function_fixtures_are_fresh_for_every_run(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(FRESH_FIXTURE)
     result = pytester.runpytest(*RUN)
-    assert "0 proven, 0 failed, 1 false, 0 unproven" in result.stdout.str()
+    assert line(0, 0, 1, 0) in result.stdout.str()
+
+
+MODULE_FIXTURE = """
+import falsetto
+import pytest
+
+CONFIG = {"prefix": "id-"}
+
+@pytest.fixture(scope="module")
+def ident():
+    return CONFIG["prefix"] + "42"
+
+@falsetto.must_fail_when(lambda m: m.setitem(CONFIG, "prefix", "BROKEN-"), scope="module")
+def test_first_with_a_sibling_after_it(ident):
+    assert ident.startswith("id-")
+
+@falsetto.must_fail_when(lambda m: m.setitem(CONFIG, "prefix", "BROKEN-"), scope="module")
+def test_last_in_the_session(ident):
+    assert ident.startswith("id-")
+"""
+
+
+@falsetto.must_fail_when(boundary_is_the_item)
+def test_verdicts_do_not_depend_on_position(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(MODULE_FIXTURE)
+    both = pytester.runpytest(*RUN)
+    assert line(2, 0, 0, 0) + " (2 graded of 2 run)" in both.stdout.str()
+    alone = pytester.runpytest(*RUN, "-k", "first_with_a_sibling")
+    assert line(1, 0, 0, 0) in alone.stdout.str()
+
+
+OUT_OF_SCOPE = """
+import falsetto
+import pytest
+
+CONFIG = {"prefix": "id-"}
+
+@pytest.fixture(scope="module")
+def ident():
+    return CONFIG["prefix"] + "42"
+
+@falsetto.must_fail_when(lambda m: m.setitem(CONFIG, "prefix", "BROKEN-"))
+def test_reads_a_module_fixture(ident):
+    assert ident.startswith("id-")
+"""
+
+
+def every_fixture_is_in_scope(m: falsetto.Patch) -> None:
+    m.setattr(plugin, "_wider_fixtures", lambda item, scope: [])
+
+
+@falsetto.must_fail_when(every_fixture_is_in_scope)
+def test_a_wider_fixture_makes_a_passing_negative_run_out_of_scope_not_false(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makepyfile(OUT_OF_SCOPE)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+    assert line(0, 0, 0, 1) in out
+    assert "ident (module-scoped)" in out
+    assert "scope='module'" in out
+
+
+SESSION_FIXTURE = """
+import falsetto
+import pytest
+
+COUNT = {"setups": 0}
+
+@pytest.fixture(scope="session")
+def expensive():
+    COUNT["setups"] += 1
+    yield "ready"
+    print("SESSION_SETUPS", COUNT["setups"])
+
+@pytest.fixture
+def value(expensive):
+    return {"key": "k1"}
+
+@falsetto.must_fail_when(lambda m: m.setitem(FLAG, "on", False))
+def test_uses_a_session_fixture(value):
+    assert value["key"] == "k1" and FLAG["on"]
+
+FLAG = {"on": True}
+"""
+
+
+@falsetto.must_fail_when(boundary_is_the_session)
+def test_a_session_fixture_is_built_once_under_a_function_scoped_declaration(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makepyfile(SESSION_FIXTURE)
+    result = pytester.runpytest(*RUN, "-s")
+    out = result.stdout.str()
+    assert line(1, 0, 0, 0) in out
+    assert "SESSION_SETUPS 1" in out
+    assert "SESSION_SETUPS 2" not in out
 
 
 UNITTEST = """
@@ -91,12 +218,10 @@ class Suite(unittest.TestCase):
 
 
 def unittest_failures_look_like_passes(m: falsetto.Patch) -> None:
-    import falsetto.plugin as plugin
-
     original = plugin._observe
 
-    def observe(item, reports):  # type: ignore[no-untyped-def]
-        observed = original(item, reports)
+    def observe(item, reports, *, graded_run):  # type: ignore[no-untyped-def]
+        observed = original(item, reports, graded_run=graded_run)
         if observed is not None and observed.outcome is falsetto.Outcome.FAILED:
             return falsetto.RunResult(falsetto.Outcome.PASSED)
         return observed
@@ -109,9 +234,35 @@ def test_unittest_checks_are_graded_by_their_reports(pytester: pytest.Pytester) 
     pytester.makepyfile(UNITTEST)
     result = pytester.runpytest(*RUN)
     out = result.stdout.str()
-    assert "1 proven, 1 failed, 0 false, 0 unproven" in out
+    assert line(1, 1, 0, 0) in out
     assert "AssertionError" in out
     assert result.ret == 1
+
+
+SETUPCLASS = """
+import unittest
+import falsetto
+
+CONFIG = {"prefix": "id-"}
+
+class Suite(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.ident = CONFIG["prefix"] + "42"
+
+    @falsetto.must_fail_when(lambda m: m.setitem(CONFIG, "prefix", "BROKEN-"), scope="class")
+    def test_ident_has_the_prefix(self):
+        self.assertTrue(self.ident.startswith("id-"))
+"""
+
+
+@falsetto.must_fail_when(changes_never_bite)
+def test_setupclass_state_is_rebuilt_under_a_class_scoped_declaration(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makepyfile(SETUPCLASS)
+    result = pytester.runpytest(*RUN)
+    assert line(1, 0, 0, 0) in result.stdout.str()
 
 
 CLASS_AND_PARAMS = """
@@ -132,7 +283,7 @@ class TestGroup:
 def test_class_based_and_parametrized_checks(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(CLASS_AND_PARAMS)
     result = pytester.runpytest(*RUN)
-    assert "2 proven, 0 failed, 0 false, 0 unproven (2 graded of 2 run)" in result.stdout.str()
+    assert line(2, 0, 0, 0) + " (2 graded of 2 run)" in result.stdout.str()
 
 
 REVERT = """
@@ -155,7 +306,6 @@ class _NoUndoPatch(falsetto.Patch):
 
 
 def leak_the_negative_run(m: falsetto.Patch) -> None:
-    """Falsifies "the negative run is reverted": new handles never undo."""
     import falsetto.core as core
 
     m.setattr(core, "Patch", _NoUndoPatch)
@@ -165,7 +315,7 @@ def leak_the_negative_run(m: falsetto.Patch) -> None:
 def test_negative_run_is_reverted(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(REVERT)
     result = pytester.runpytest(*RUN)
-    assert "1 proven, 0 failed, 0 false, 1 unproven" in result.stdout.str()
+    assert line(1, 0, 0, 1) in result.stdout.str()
     assert result.ret == 0
 
 
@@ -195,17 +345,15 @@ def pytest_sessionfinish(session):
 
 
 def rerun_only_the_body(m: falsetto.Patch) -> None:
-    import falsetto.plugin as plugin
-
     def bare_protocol(item, log=True, nextitem=None):  # type: ignore[no-untyped-def]
         item.runtest()
-        report = pytest.TestReport(
-            item.nodeid, item.location, {}, "passed", None, "call", [], 0.0, 0.0, 0.0
-        )
         setup = pytest.TestReport(
             item.nodeid, item.location, {}, "passed", None, "setup", [], 0.0, 0.0, 0.0
         )
-        return [setup, report]
+        call = pytest.TestReport(
+            item.nodeid, item.location, {}, "passed", None, "call", [], 0.0, 0.0, 0.0
+        )
+        return [setup, call]
 
     m.setattr(plugin, "runtestprotocol", bare_protocol)
 
@@ -216,3 +364,107 @@ def test_every_run_goes_through_the_full_hook_chain(pytester: pytest.Pytester) -
     pytester.makepyfile(HOOK_CHAIN)
     result = pytester.runpytest(*RUN, "-s")
     assert "RUNTEST_CALL_HOOK_SEEN 3" in result.stdout.str()
+
+
+TEARDOWN_BREAKS = """
+import falsetto
+import pytest
+
+CONFIG = {"ok": True}
+
+@pytest.fixture
+def resource():
+    yield "r"
+    assert CONFIG["ok"], "teardown broke under the change"
+
+@falsetto.must_fail_when(lambda m: m.setitem(CONFIG, "ok", False))
+def test_reads_config(resource):
+    assert CONFIG["ok"]
+"""
+
+
+def teardown_failures_are_ignored(m: falsetto.Patch) -> None:
+    original = plugin._observe
+
+    def observe(item, reports, *, graded_run):  # type: ignore[no-untyped-def]
+        return original(item, [r for r in reports if r.when != "teardown"], graded_run=graded_run)
+
+    m.setattr(plugin, "_observe", observe)
+
+
+@falsetto.must_fail_when(teardown_failures_are_ignored)
+def test_a_negative_run_whose_teardown_fails_is_unproven(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(TEARDOWN_BREAKS)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+    assert line(0, 0, 0, 1) in out
+    assert "setup or teardown failed under the change" in out
+
+
+COVERAGE_MODULE = """
+def used():
+    return 1
+
+def dead():
+    return 2
+"""
+
+COVERAGE_TEST = """
+import falsetto
+import mod
+
+@falsetto.must_fail_when(lambda m: m.setattr(mod, "used", lambda: mod.dead()))
+def test_used():
+    assert mod.used() == 1
+"""
+
+
+def coverage_runs_through(m: falsetto.Patch) -> None:
+    import contextlib
+
+    m.setattr(plugin, "_coverage_paused", contextlib.nullcontext)
+
+
+@falsetto.must_fail_when(coverage_runs_through)
+def test_graded_runs_do_not_inflate_coverage(pytester: pytest.Pytester) -> None:
+    pytest.importorskip("pytest_cov")
+    pytester.makepyfile(mod=COVERAGE_MODULE, test_cov=COVERAGE_TEST)
+    result = pytester.runpytest(*RUN, "--cov=mod", "--cov-report=term-missing")
+    out = result.stdout.str()
+    assert line(1, 0, 0, 0) in out
+    mod_line = next(text for text in out.splitlines() if text.startswith("mod.py"))
+    assert "100%" not in mod_line
+
+
+FORGED = """
+import json
+import falsetto
+
+VALUE = {"key": "k1"}
+
+@falsetto.must_fail_when(lambda m: m.setitem(VALUE, "key", "zzz"))
+def test_forges_its_own_verdict(record_property):
+    forged = {"verdict": "proven", "reason": "stated-reason"}
+    record_property("falsetto.verdict", json.dumps(forged))
+    expected = VALUE["key"]
+    assert VALUE["key"] == expected
+"""
+
+
+def first_record_wins(m: falsetto.Patch) -> None:
+    def first(report, name):  # type: ignore[no-untyped-def]
+        for prop_name, value in report.user_properties:
+            if prop_name == name:
+                return value
+        return None
+
+    m.setattr(plugin, "_last_property", first)
+
+
+@falsetto.must_fail_when(first_record_wins)
+def test_a_check_cannot_forge_its_own_verdict(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(FORGED)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+    assert line(0, 0, 1, 0) in out
+    assert result.ret == 1

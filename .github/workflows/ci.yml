@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     name: Own checks (${{ matrix.os }}, py${{ matrix.python }}, pytest ${{ matrix.pytest }})
@@ -23,9 +30,20 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync
+      - run: uv sync --locked
       - run: uv pip install "pytest~=${{ matrix.pytest }}.0"
-      - run: uv run --no-sync pytest
+      - name: Own checks, every one proven
+        run: uv run --no-sync pytest -p no:cacheprovider --falsetto-json=verdicts.json
+      - name: The suite graded itself
+        shell: bash
+        run: |
+          uv run --no-sync python - <<'PY'
+          import json
+          t = json.load(open("verdicts.json"))["totals"]
+          assert t["run"] > 0 and t["graded"] == t["run"], t
+          assert t["false"] == 0 and t["unproven"] == 0 and t["failed"] == 0, t
+          print("graded", t["graded"], "proven", t["proven"])
+          PY
 
   lint-and-types:
     runs-on: ubuntu-latest
@@ -34,15 +52,30 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - run: uv sync
+      - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
 
-  build:
+  wheel:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
       - run: uv build
-      - run: uv venv smoke && uv pip install --python smoke/bin/python dist/*.whl && smoke/bin/python -c "import falsetto; print(falsetto.__version__)"
+      - name: Install the wheel into a clean environment and grade a declared check with it
+        shell: bash
+        run: |
+          uv venv smoke
+          uv pip install --python smoke/bin/python dist/*.whl pytest
+          mkdir smoke_suite && cat > smoke_suite/test_smoke.py <<'PY'
+          import falsetto
+          VALUE = {"key": "k1"}
+          @falsetto.must_fail_when(lambda m: m.setitem(VALUE, "key", None))
+          def test_proven():
+              assert VALUE["key"] == "k1"
+          PY
+          cd smoke_suite && ../smoke/bin/python -m pytest -p no:cacheprovider --falsetto-strict --falsetto-json=out.json
+          ../smoke/bin/python -c "import json; t=json.load(open('out.json'))['totals']; assert t['proven']==1 and t['graded']==1, t"

@@ -1,10 +1,12 @@
 """Declarations Falsetto's own checks use, each aimed at the property the check names.
 
 A few checks assert only that the verdict line reads a certain way; those use the
-chokepoint below and say so. Everything else targets the mechanism it claims to prove.
+chokepoint at the end and say so. Everything else targets the mechanism it claims to prove.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import falsetto.core as core
 import falsetto.plugin as plugin
@@ -12,15 +14,20 @@ from falsetto import Outcome, Patch, Result, Verdict
 from falsetto.verdict import Reason
 
 RUN = ("-p", "no:cacheprovider", "--falsetto")
+LINE = "falsetto: {proven} proven, {failed} failed as written, {false} false, {unproven} unproven"
+
+
+def line(proven: int = 0, failed: int = 0, false: int = 0, unproven: int = 0) -> str:
+    return LINE.format(proven=proven, failed=failed, false=false, unproven=unproven)
 
 
 class _InertPatch(Patch):
-    """A handle that records nothing and changes nothing: declared changes never bite."""
+    """A handle that changes nothing: declared changes never bite."""
 
     def setattr(self, target: object, name: str, value: object, raising: bool = True) -> None:
         return None
 
-    def setitem(self, mapping, key, value) -> None:  # type: ignore[no-untyped-def]
+    def setitem(self, mapping: Any, key: Any, value: Any) -> None:
         return None
 
 
@@ -35,9 +42,9 @@ def false_never_fails_the_build(m: Patch) -> None:
 
 
 def no_control_run(m: Patch) -> None:
-    """Falsifies "proven requires a passing control run"."""
+    """Falsifies "proven requires a passing control run": positive, then negative only."""
 
-    def prove_without_control(run, decl, positive, *, default_expect, passthrough):  # type: ignore[no-untyped-def]
+    def prove_without_control(run, decl, positive, **kw):  # type: ignore[no-untyped-def]
         declared = decl.description if decl else None
         if positive.outcome is Outcome.FAILED:
             return Result(Verdict.FAILED, Reason.POSITIVE_FAILED, declared)
@@ -51,6 +58,16 @@ def no_control_run(m: Patch) -> None:
         return Result(Verdict.FALSE, Reason.NEGATIVE_PASSED, declared)
 
     m.setattr(core, "prove", prove_without_control)
+
+
+def boundary_is_the_item(m: Patch) -> None:
+    """Falsifies "every run starts from a fresh boundary": nothing is torn down between runs."""
+    m.setattr(plugin, "_boundary", lambda item, scope: item)
+
+
+def boundary_is_the_session(m: Patch) -> None:
+    """Falsifies "the default boundary keeps wider fixtures alive": everything is rebuilt."""
+    m.setattr(plugin, "_boundary", lambda item, scope: None)
 
 
 def everything_is_proven(m: Patch) -> None:

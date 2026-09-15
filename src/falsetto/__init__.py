@@ -2,12 +2,13 @@
 the check is capable of failing."""
 
 from .core import Outcome, RunResult, check, check_callable, prove, run_callable
-from .declaration import Declaration, must_fail_when
+from .declaration import SCOPES, Declaration, must_fail_when
 from .patching import Patch
 from .verdict import Reason, Result, Verdict
 
 __version__ = "0.0.1"
 __all__ = [
+    "SCOPES",
     "Declaration",
     "Outcome",
     "Patch",

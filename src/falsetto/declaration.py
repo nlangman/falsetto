@@ -15,6 +15,7 @@ Expect = ExceptionTypes | Callable[[BaseException], bool]
 
 ATTR = "__falsetto_declaration__"
 UNDESCRIBED = "(undescribed change; pass describe= to name it)"
+SCOPES = ("function", "class", "module", "session")
 
 
 def _describe_callable(fn: Callable[..., Any]) -> str:
@@ -61,6 +62,12 @@ class Declaration:
     change: Change
     expect: Expect | None = None
     describe: str | None = None
+    scope: str = "function"
+    """How deep the change reaches: the fixture scopes rebuilt under it for each run."""
+
+    def __post_init__(self) -> None:
+        if self.scope not in SCOPES:
+            raise ValueError(f"scope must be one of {SCOPES}, not {self.scope!r}")
 
     @property
     def description(self) -> str:
@@ -68,6 +75,8 @@ class Declaration:
         text = self.describe or _describe_callable(self.change)
         if self.expect is not None:
             text += f" [expect={self.expectation}]"
+        if self.scope != "function":
+            text += f" [scope={self.scope}]"
         return text
 
     @property
@@ -102,18 +111,23 @@ def must_fail_when(
     *,
     expect: Expect | None = None,
     describe: str | None = None,
+    scope: str = "function",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Declare the change to the subject under which the decorated check must fail.
 
-    The decorator attaches the declaration and returns the function unchanged, so the
-    runner's fixture resolution and signature handling are untouched. Applying it
-    twice is an error: a check has one declaration.
+    ``scope`` says how deep the change reaches: which fixture scopes ("function",
+    "class", "module" or "session") are rebuilt under the change for each run. The
+    default rebuilds only the check's own function-scoped fixtures. The decorator
+    attaches the declaration and returns the function unchanged, so the runner's
+    fixture resolution and signature handling are untouched. Applying it twice is an
+    error: a check has one declaration.
     """
 
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
         if _already_declared(func):
             raise TypeError(f"{func.__qualname__} already carries a declaration")
-        setattr(func, ATTR, Declaration(change=change, expect=expect, describe=describe))
+        declaration = Declaration(change=change, expect=expect, describe=describe, scope=scope)
+        setattr(func, ATTR, declaration)
         return func
 
     return decorate
