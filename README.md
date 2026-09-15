@@ -63,3 +63,7 @@ pytest                          # Falsetto's own checks, each one proven
 ```
 
 The design is in [docs/design.md](docs/design.md) and the build plan in [docs/plan.md](docs/plan.md).
+
+## Licence
+
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
