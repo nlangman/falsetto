@@ -15,3 +15,4 @@ All notable changes to Falsetto are recorded here. The format follows
   JUnit output.
 - The router example with one check per verdict.
 - Apache License 2.0.
+- A prior-art page: spec-verify, pytest-mutagen, extreme mutation, and the wider field.

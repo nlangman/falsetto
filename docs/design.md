@@ -105,7 +105,7 @@ Whole-program mutation tools generate many mutants across a codebase and report 
 - **Intentional.** The author's claim about what the check detects is itself checked, which is where the authoring feedback comes from.
 - **A third state.** A kill ratio cannot say "this specific check is false." A per-check verdict can.
 
-The two are complementary. Falsetto does not generate mutants and does not aim to. Characterizations of specific tools are to be verified against their documentation before publication.
+The two are complementary. Falsetto does not generate mutants and does not aim to. The nearest neighbours, pytest-mutagen (hand-declared mutants, 2020) and spec-verify (one targeted mutation per acceptance criterion inside an agent workflow, 2026), and the pseudo-tested-methods literature are described in [prior-art.md](prior-art.md), with what each lacks that Falsetto adds.
 
 ## 10. Non-goals
 

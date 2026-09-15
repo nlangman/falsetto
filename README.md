@@ -62,7 +62,7 @@ pytest examples/router          # the four verdicts, one check each
 pytest                          # Falsetto's own checks, each one proven
 ```
 
-The design is in [docs/design.md](docs/design.md) and the build plan in [docs/plan.md](docs/plan.md).
+The design is in [docs/design.md](docs/design.md), the build plan in [docs/plan.md](docs/plan.md), and what came before in [docs/prior-art.md](docs/prior-art.md).
 
 ## Licence
 

@@ -37,4 +37,4 @@ The visibility flip is the only irreversible act. Before it:
 1. The leak gate runs over the full history, not just the tree, and is proven red on a planted term first.
 2. The package name is in place. The licence already is.
 3. The maintainer reads every file in the repository.
-4. Prior-art characterizations in the design are verified.
+4. Every entry in `docs/prior-art.md` is re-read against its primary source.
