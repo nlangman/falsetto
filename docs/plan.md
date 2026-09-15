@@ -33,7 +33,6 @@ A small router application in `examples/router/` with four checks, one per verdi
 - A guard against `scope="session"` in suites whose later tests rely on accumulated session state.
 - Redaction of string literals in an auto-generated declaration description.
 - `falsetto.excluded` can still be recorded by a test; it cannot turn a failure into a pass.
-- A dedicated contact address for the code of conduct before the flip. That address is the maintainer's to provide.
 - Timing of the Swift Testing port.
 
 ## Release protocol

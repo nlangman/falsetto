@@ -38,6 +38,12 @@ Contributions are accepted under the Apache License 2.0; by submitting one you
 agree to its terms for your contribution, as its section 5 describes. No separate
 agreement is needed.
 
+## Conduct
+
+Discussion here stays constructive and on the work. The maintainer will lock or remove
+what is not. Anyone who needs to report a person can use GitHub's own reporting tools.
+A fuller code of conduct arrives with a second maintainer.
+
 ## Reporting a bug
 
 Open an issue with the smallest check that shows the problem and the verdict line
