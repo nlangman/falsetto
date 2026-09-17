@@ -420,17 +420,27 @@ def test_used():
 """
 
 
-def coverage_runs_through(m: falsetto.Patch) -> None:
-    import contextlib
+COVERAGE_CONFTEST = """
+import contextlib
+import os
 
-    m.setattr(plugin, "_coverage_paused", contextlib.nullcontext)
+import falsetto.plugin
+
+if os.environ.get("FALSETTO_TEST_COVERAGE_RUNS_THROUGH"):
+    falsetto.plugin._coverage_paused = contextlib.nullcontext
+"""
+
+
+def coverage_runs_through(m: falsetto.Patch) -> None:
+    m.setenv("FALSETTO_TEST_COVERAGE_RUNS_THROUGH", "1")
 
 
 @falsetto.must_fail_when(coverage_runs_through)
 def test_graded_runs_do_not_inflate_coverage(pytester: pytest.Pytester) -> None:
     pytest.importorskip("pytest_cov")
+    pytester.makeconftest(COVERAGE_CONFTEST)
     pytester.makepyfile(mod=COVERAGE_MODULE, test_cov=COVERAGE_TEST)
-    result = pytester.runpytest(*RUN, "--cov=mod", "--cov-report=term-missing")
+    result = pytester.runpytest_subprocess(*RUN, "--cov=mod", "--cov-report=term-missing")
     out = result.stdout.str()
     assert line(1, 0, 0, 0) in out
     mod_line = next(text for text in out.splitlines() if text.startswith("mod.py"))
