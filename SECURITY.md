@@ -3,8 +3,12 @@
 Falsetto runs a declared test at least three times and patches your code in-process
 during the last run. It never edits your code or your tests on disk; the only file it writes is
 the report you ask for with `--falsetto-json`. It never executes anything it did not
-receive from your own test suite. Still, a bug that made the negative run escape its
-scope would be a security matter, and we treat it as one.
+receive from your own test suite.
+
+Every patch Falsetto applies for one test is meant to be undone before the next test runs,
+and never to reach anything outside the test process. If a bug ever lets a patch outlive
+its test, or reach outside the process, we treat that as a security issue, not only a bug.
+Report it the same way.
 
 ## Reporting
 

@@ -44,7 +44,7 @@ dev = ["ruff>=0.6", "mypy>=1.10", "pytest-xdist>=3.5", "pytest-cov>=5.0"]
 path = "src/falsetto/__init__.py"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["CLAUDE.md", ".github/", "docs/plan.md", ".editorconfig"]
+exclude = ["AGENTS.md", "CLAUDE.md", ".github/", "docs/plan.md", ".editorconfig"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/falsetto"]

@@ -2,9 +2,11 @@
 
 **A green you can trust.**
 
-Falsetto is a pytest plugin that refuses to count a test until it has proven the test can fail. Coding agents now write tests and evals faster than anyone reads them, and a runner that reports only pass or fail cannot tell a test that guards something from one that passes no matter what. Mutation tools grade a whole suite with thousands of random edits and hours of runtime, and still cannot say which test is wrong. Falsetto asks each test for the one change that should make it red, runs the test without that change and then with it, and counts only the tests that fail when they should. The result is a green you can trust: every passing check has been red once, on purpose, and a test that quietly stops being able to fail turns the build red the day it happens.
+Falsetto is a pytest plugin that finds bad tests and evals, the ones that cannot fail, and refuses to count them. Agents now write tests and evals at a volume no human can validate by reading. Test runners report pass and fail, and cannot see a test that cannot fail. Mutation tools take hours to edit a whole suite at random and still cannot point at the bad test. Bad tests hand agents and humans a confidence nothing earned.
 
-Test runners report two states: pass and fail. They hide a third: a test that cannot fail. It stays green because the thing it checks is missing on both sides, or the fixture is empty, or the assertion compares nothing to nothing. Such a test proves nothing, and it looks exactly like a test that proves everything. A falsetto is a voice that sounds high but is not the real voice. Falsetto finds the false voice in your suite and shouts, loudly, at bad tests and evals.
+Falsetto asks each test for one change to the code under test that should make it red, runs the test without that change and then with it, and counts only the tests that fail when they should. The result is a green you can trust: every passing check has been proven able to fail, a check that quietly loses that ability turns the build red, and an agent gets that signal on the run where it happens, not in review.
+
+A falsetto is a voice that sounds high but is not the real voice. Falsetto finds the false voice in your suite and shouts, loudly, at bad tests and evals.
 
 ## The problem, in one example
 

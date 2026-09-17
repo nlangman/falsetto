@@ -71,6 +71,30 @@ sequenceDiagram
     plugin->>pytest: pytest_runtest_logreport x3 (setup, call, teardown)
 ```
 
+## What it looks like
+
+The router example (`pytest examples/router`) has one check per verdict. Its Falsetto
+section, verbatim; the proven check is silent, because a proof needs no action:
+
+```text
+=================================== falsetto ===================================
+FALSE examples/router/test_router.py::test_route_queue_matches: still passed under the declared change
+    declared: lambda m: m.setattr(router, "pick_route", pick_route_to_wrong_queue)
+    hint: Either the assertion does not observe the change, the fixture is the tautology, the change never reached the subject (a name imported directly into the test module is not affected by patching its source module), or state warmed by an earlier run, such as a cache, masked the change.
+UNPROVEN examples/router/test_router.py::test_ops_body_routes_to_ops: no declared change
+    hint: Declare the change to the subject that should make this check fail.
+falsetto: 1 proven, 1 failed as written, 1 false, 1 unproven (4 graded of 4 run)
+=========================== short test summary info ============================
+FAILED examples/router/test_router.py::test_route_queue_is_billing - Assertio...
+FALSE examples/router/test_router.py::test_route_queue_matches - FALSE: still...
+UNPROVEN examples/router/test_router.py::test_ops_body_routes_to_ops - UNPROV...
+3 failed, 1 passed in 0.06s
+```
+
+The false and unproven checks are real failures in pytest's own summary, so `-x`, `--lf`,
+JUnit and the exit status all see them. `--falsetto-json=verdicts.json` writes the same
+verdicts, with reason codes and evidence, for a machine reader.
+
 ## Where a new front-end plugs in
 
 A harness that is not pytest supplies one thing: a callable that runs its check once and
