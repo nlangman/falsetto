@@ -2,11 +2,9 @@
 
 **A green you can trust.**
 
-Falsetto is a pytest plugin that finds bad tests and evals, the ones that cannot fail, and refuses to count them. Agents now write tests and evals at a volume no human can validate by reading. Test runners report pass and fail, and cannot see a test that cannot fail. Mutation tools edit a whole codebase at random and report which edits survived, which names a gap in the suite rather than the test at fault, and takes hours. Bad tests hand agents and humans a confidence nothing earned.
+Falsetto is a pytest plugin that helps agents identify bad tests and evals during implementation and execution. Today, agents write tests and evals at a volume that makes human validation unfeasible. Test runners only report pass and fail. They cannot identify a test that cannot fail. Mutation tools evaluate a whole suite with random edits taking hours and still cannot identify a bad test. Bad tests create a false sense of confidence for agents and humans.
 
-Falsetto asks each test for one change to the code under test that should make it red, runs the test without that change and then with it, and counts only the tests that fail when they should. The result is a green you can trust: every passing check has been proven able to fail, a check that quietly loses that ability turns the build red, and an agent gets that signal on the run where it happens, not in review.
-
-A falsetto is a voice that sounds high but is not the real voice. Falsetto finds the false voice in your suite and shouts, loudly, at bad tests and evals.
+Falsetto is designed to find the false signal in your suite and shout loudly at bad tests and evals. Falsetto asks each test for one change to the code being tested that should make it red, runs the test without and then with that change, and only counts tests that fail when they should. The result is a green you can trust: every passing check purposefully proven able to fail, checks that quietly stop being able to fail turn the build red, and agents get real-time signal during construction and execution.
 
 ## The problem, in one example
 
