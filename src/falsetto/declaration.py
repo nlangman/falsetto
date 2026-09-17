@@ -14,9 +14,15 @@ ExceptionTypes = type[BaseException] | tuple[type[BaseException], ...]
 Expect = ExceptionTypes | Callable[[BaseException], bool]
 
 ATTR = "__falsetto_declaration__"
+TEXT_LIMIT = 300
 UNDESCRIBED = "(undescribed change; pass describe= to name it)"
 Scope = Literal["function", "class", "module", "package", "session"]
 SCOPES: tuple[str, ...] = get_args(Scope)
+
+
+def _clamp(text: str) -> str:
+    """Author-supplied text reaches a report bounded: a huge describe or repr is not a report."""
+    return text[:TEXT_LIMIT]
 
 
 def _describe_callable(fn: Callable[..., Any]) -> str:
@@ -73,7 +79,7 @@ class Declaration:
     @property
     def description(self) -> str:
         """A short human description of the declared change, for reports."""
-        text = self.describe or _describe_callable(self.change)
+        text = _clamp(self.describe or _describe_callable(self.change))
         if self.expect is not None:
             text += f" [expect={self.expectation}]"
         if self.scope != "function":
@@ -82,11 +88,12 @@ class Declaration:
 
     @property
     def expectation(self) -> str:
+        """The expected failure, named for reports and bounded like every author-supplied text."""
         if self.expect is None:
             return "default"
         if isinstance(self.expect, type | tuple):
-            return _type_names(self.expect)
-        return f"predicate {getattr(self.expect, '__qualname__', repr(self.expect))}"
+            return _clamp(_type_names(self.expect))
+        return _clamp(f"predicate {getattr(self.expect, '__qualname__', repr(self.expect))}")
 
     def matches(self, exc: BaseException | None, default: ExceptionTypes) -> tuple[bool, str]:
         """Decide whether ``exc`` is the failure this declaration expects.

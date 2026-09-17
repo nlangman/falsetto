@@ -10,6 +10,15 @@ from typing import Any
 _MISSING = object()
 
 
+def _attempt(step: Callable[[], None]) -> BaseException | None:
+    """Run one undo step and report what it raised, so the loop can finish either way."""
+    try:
+        step()
+    except BaseException as e:
+        return e
+    return None
+
+
 class Patch:
     """The handle a declaration receives. Changes go through it so they revert.
 
@@ -30,14 +39,21 @@ class Patch:
         self.undo()
 
     def undo(self) -> None:
-        """Undo every recorded change, most recent first, even if some steps raise."""
-        errors: list[Exception] = []
+        """Undo every recorded change, most recent first, even if some steps raise.
+
+        An interrupt (``KeyboardInterrupt``, ``SystemExit``) raised by one step does not
+        leave the subject half-restored: the remaining steps still run, and the interrupt
+        is raised afterwards, ahead of any ordinary error.
+        """
+        errors: list[BaseException] = []
+        interrupts: list[BaseException] = []
         while self._undo:
-            step = self._undo.pop()
-            try:
-                step()
-            except Exception as e:
-                errors.append(e)
+            raised = _attempt(self._undo.pop())
+            if raised is None:
+                continue
+            (errors if isinstance(raised, Exception) else interrupts).append(raised)
+        if interrupts:
+            raise interrupts[0]
         if errors:
             if len(errors) == 1:
                 raise errors[0]

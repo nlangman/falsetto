@@ -24,7 +24,9 @@ only `falsetto.core` computes a verdict.
 5. **The core grades.** `core.prove(run, declaration, positive, ...)` receives a `run`
    callable that performs one more unlogged protocol at the same boundary, with coverage
    paused and the debugger plugins unregistered. The core runs the control runs, applies
-   the change through a `Patch`, runs the negative run, reverts, and classifies.
+   the change through a `Patch`, runs the negative run, reverts, and classifies. A revert
+   that raises is `core._revert`'s own verdict, not-reverted: the subject is still patched,
+   so nothing later in the session can be graded against it.
    `plugin._wider_fixtures` tells it which suite-defined fixtures the check used, by any
    route, beyond the declaration's scope, so a passing negative run becomes "out of scope"
    rather than "false" when the change may never have reached them.
@@ -35,7 +37,9 @@ only `falsetto.core` computes a verdict.
 7. **The verdict is attached.** `plugin._attach` puts the `Result` on the call and
    teardown reports as one JSON record under `falsetto.verdict`, appended last so nothing
    a test recorded under that name can win. A false verdict, a strict unproven verdict,
-   or an internal error marks the report failed and appends the reason to its text.
+   an out-of-scope, misconfigured or not-reverted verdict, or an internal error marks the
+   report failed and appends the reason to its text. On not-reverted, `plugin._attach` also
+   sets `session.shouldfail`, so pytest stops after this item.
 8. **The reports are logged once.** pytest's reporters, `-x`, `--lf`, JUnit and the exit
    status see the positive run's reports with the verdict already on them.
 9. **The session tallies.** `plugin._Session.pytest_runtest_logreport` reads every logged

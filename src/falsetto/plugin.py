@@ -55,6 +55,10 @@ PASSTHROUGH: tuple[type[BaseException], ...] = (
 )
 _SCOPE_RANK = {"function": 0, "class": 1, "module": 2, "package": 3, "session": 4}
 _EVIDENCE_LINES = 12
+STOP_NOT_REVERTED = (
+    "falsetto: a declared change could not be undone; every later check would run against "
+    "a patched subject"
+)
 _DEBUGGER_PLUGINS = ("pdbinvoke", "pdbtrace")
 
 # What runtestprotocol's teardown tears down to. pytest types it as an Item, but the
@@ -106,7 +110,7 @@ def _summary(report: pytest.TestReport) -> str:
 def _location(excinfo: Any) -> str | None:
     try:
         entry = excinfo.traceback[-1]
-        return f"{entry.path}:{entry.lineno + 1}"
+        return f"{core.report_path(str(entry.path))}:{entry.lineno + 1}"
     except (AttributeError, IndexError, TypeError):
         return None
 
@@ -203,6 +207,25 @@ def _warn_competing_protocols(config: pytest.Config) -> None:
         )
 
 
+def _controls(config: pytest.Config, enabled: bool) -> int:
+    """How many control runs precede the negative run.
+
+    The ini value is read only when Falsetto is enabled, so a malformed one never
+    touches a run that did not ask for grading, and a malformed one on a run that did
+    is a usage error rather than a crash inside configure.
+    """
+    if not enabled:
+        return 1
+    given = config.getoption("falsetto_controls")
+    if given is not None:
+        return max(1, int(given))
+    raw = config.getini("falsetto_controls") or 1
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        raise pytest.UsageError("falsetto_controls must be an integer") from None
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
@@ -211,10 +234,8 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     strict = bool(config.getoption("falsetto_strict") or _ini(config, "falsetto_strict"))
     enabled = bool(config.getoption("falsetto") or _ini(config, "falsetto") or strict)
-    controls = config.getoption("falsetto_controls")
-    if controls is None:
-        controls = int(config.getini("falsetto_controls") or 1)
-    settings = Settings(enabled, strict, config.getoption("falsetto_json"), max(1, controls))
+    controls = _controls(config, enabled)
+    settings = Settings(enabled, strict, config.getoption("falsetto_json"), controls)
     config.stash[SETTINGS] = settings
     if enabled:
         config.pluginmanager.register(_Session(settings, config), "falsetto-session")
@@ -452,7 +473,12 @@ def _grade(
 
 
 def _fails_build(result: Result, strict: bool) -> bool:
-    always = (Reason.INTERNAL_ERROR, Reason.OUT_OF_SCOPE, Reason.MISCONFIGURED)
+    always = (
+        Reason.INTERNAL_ERROR,
+        Reason.OUT_OF_SCOPE,
+        Reason.MISCONFIGURED,
+        Reason.NOT_REVERTED,
+    )
     if result.reason in always or result.verdict is Verdict.FALSE:
         return True
     return strict and result.verdict is Verdict.UNPROVEN
@@ -468,7 +494,7 @@ def _longrepr(result: Result, item: pytest.Item) -> str:
         )
     if result.verdict is Verdict.FALSE:
         head = "FALSE"
-    elif result.reason in (Reason.OUT_OF_SCOPE, Reason.MISCONFIGURED):
+    elif result.reason in (Reason.OUT_OF_SCOPE, Reason.MISCONFIGURED, Reason.NOT_REVERTED):
         head = f"UNPROVEN ({result.reason.value})"
     else:
         head = "UNPROVEN (strict)"
@@ -480,6 +506,16 @@ def _longrepr(result: Result, item: pytest.Item) -> str:
     if result.hint:
         lines.append(f"  hint: {result.hint}")
     return "\n".join(lines)
+
+
+def _stop_if_not_reverted(item: pytest.Item, result: Result) -> None:
+    """Stop the session when a declared change is still applied: later checks are not graded.
+
+    Everything after this item would run against a patched subject, so a green verdict from
+    any of them would mean nothing. Under xdist this stops the worker, not the session.
+    """
+    if result.reason is Reason.NOT_REVERTED:
+        item.session.shouldfail = STOP_NOT_REVERTED
 
 
 def _attach_target(reports: list[pytest.TestReport]) -> pytest.TestReport | None:
@@ -501,6 +537,7 @@ def _attach(
     for report in reports:
         if report.when in ("call", "teardown"):
             report.user_properties.append(record)
+    _stop_if_not_reverted(item, result)
     if not _fails_build(result, settings.strict):
         return
     target = _attach_target(reports)

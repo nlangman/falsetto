@@ -19,7 +19,7 @@ All notable changes to Falsetto are recorded here. The format follows
   `falsetto_strict` ini keys, and the `no_proof` marker.
 - Verdict records on `user_properties` as JSON, so they survive xdist and appear in JUnit.
 - Reason codes on every verdict: stated-reason, positive-failed, negative-passed, undeclared,
-  not-applied, wrong-reason, not-repeatable, internal-error.
+  not-applied, not-reverted, wrong-reason, not-repeatable, internal-error.
 - The router example with one check per verdict.
 - A prior-art page: spec-verify, pytest-mutagen, extreme mutation, and the wider field.
 - Apache License 2.0.
@@ -32,6 +32,19 @@ All notable changes to Falsetto are recorded here. The format follows
 - A warning at startup naming plugins that also implement the run protocol.
 - `--falsetto-controls` and the `falsetto_controls` ini key: the number of control runs.
 - `scope="package"`; `complete` and `stopped` in the JSON report.
+
+### Fixed
+- A declared change whose undo raises is the verdict not-reverted, which always fails the build
+  and stops the session, rather than an internal error reported as a bug in Falsetto while every
+  later check runs against a subject that is still patched.
+- Locations in reports are relative to the working directory when the file is inside it, so a
+  report does not carry the machine it ran on.
+- A malformed `falsetto_controls` ini value is read only when Falsetto is enabled, and is a
+  usage error rather than a crash inside `pytest_configure`.
+- An interrupt raised by one undo step no longer strands the remaining ones: every step runs,
+  and the interrupt is raised afterwards, ahead of any ordinary error.
+- A declaration's description and expectation, and an internal error's traceback, are bounded
+  before they reach a report.
 
 ### Changed
 - After review round one the negative run became a whole fresh protocol with the change

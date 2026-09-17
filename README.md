@@ -43,7 +43,7 @@ A month later a colleague simplifies the shared fixture in another file, so `msg
 | **proven** | Passed as written, passed again without the change, and failed under it. |
 | **failed** | Failed as written. An ordinary red check. |
 | **false** | Passed as written, and still passed under its declared change. The check is wrong. **This fails the build.** |
-| **unproven** | Nothing is known yet: no declaration, or no failure could be attributed to the change. Fails the build in strict mode. Three kinds always fail the build: **out of scope** (the check uses a fixture wider than its declaration rebuilds, so the change may never have reached it), **misconfigured** (a declaration or marker that contradicts itself), and **internal error** (Falsetto itself failed while grading). |
+| **unproven** | Nothing is known yet: no declaration, or no failure could be attributed to the change. Fails the build in strict mode. Four kinds always fail the build: **out of scope** (the check uses a fixture wider than its declaration rebuilds, so the change may never have reached it), **misconfigured** (a declaration or marker that contradicts itself), **not reverted** (the declared change could not be undone, so every later check would run against a patched subject; the session stops there), and **internal error** (Falsetto itself failed while grading). |
 
 ```mermaid
 flowchart TD

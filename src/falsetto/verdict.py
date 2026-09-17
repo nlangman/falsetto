@@ -31,6 +31,7 @@ class Reason(str, Enum):
     NEGATIVE_PASSED = "negative-passed"
     UNDECLARED = "undeclared"
     NOT_APPLIED = "not-applied"
+    NOT_REVERTED = "not-reverted"
     WRONG_REASON = "wrong-reason"
     NOT_REPEATABLE = "not-repeatable"
     OUT_OF_SCOPE = "out-of-scope"
@@ -49,6 +50,8 @@ MESSAGES: dict[Reason, str] = {
     Reason.NEGATIVE_PASSED: "still passed under the declared change",
     Reason.UNDECLARED: "no declared change",
     Reason.NOT_APPLIED: "the declared change could not be applied",
+    Reason.NOT_REVERTED: "the declared change could not be undone, so it may still be applied to "
+    "every later check",
     Reason.WRONG_REASON: "failed under the declared change, but not for the stated reason",
     Reason.NOT_REPEATABLE: "did not pass when run again without the change, so no failure can be "
     "attributed to the change",
@@ -69,6 +72,10 @@ HINTS: dict[Reason, str] = {
     ),
     Reason.NOT_APPLIED: (
         "Fix the declared change; nothing is known about this check until it applies."
+    ),
+    Reason.NOT_REVERTED: (
+        "Nothing after this check in this session can be trusted. Make the change's undo path "
+        "safe (whatever it patches must accept its original value back), then rerun."
     ),
     Reason.WRONG_REASON: (
         "Narrow the change so it trips the check's own assertion, or pass expect= on the "

@@ -8,6 +8,7 @@ control and negative runs, applies the declared change through a
 
 from __future__ import annotations
 
+import os
 import traceback
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -56,6 +57,22 @@ def describe_exception(exc: BaseException) -> str:
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
 
+def report_path(filename: str) -> str:
+    """A file inside the working directory, named relative to it; anything else as it is.
+
+    A report travels: an absolute path carries the machine it ran on into it, and a relative
+    one is the name the reader's own editor opens.
+    """
+    try:
+        cwd = Path.cwd().resolve()
+        path = Path(filename).resolve()
+    except OSError:  # pragma: no cover - a working directory that no longer exists
+        return filename
+    if path == cwd or cwd in path.parents:
+        return os.path.relpath(path, cwd)
+    return filename
+
+
 def location_of(exc: BaseException) -> str | None:
     """The innermost frame outside Falsetto itself: the author's own line."""
     frames = traceback.extract_tb(exc.__traceback__)
@@ -63,8 +80,8 @@ def location_of(exc: BaseException) -> str | None:
         return None
     for frame in reversed(frames):
         if not str(Path(frame.filename).resolve()).startswith(_PACKAGE_DIR):
-            return f"{frame.filename}:{frame.lineno}"
-    return f"{frames[-1].filename}:{frames[-1].lineno}"
+            return f"{report_path(frame.filename)}:{frame.lineno}"
+    return f"{report_path(frames[-1].filename)}:{frames[-1].lineno}"
 
 
 def _evidence(text: str) -> str:
@@ -82,6 +99,23 @@ def run_callable(fn: Callable[[], object], passthrough: Passthrough = PASSTHROUG
         text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
         return RunResult(Outcome.FAILED, e, location_of(e), describe_exception(e), _evidence(text))
     return RunResult(Outcome.PASSED)
+
+
+def _revert(patch: Patch, declared: str | None, passthrough: Passthrough) -> Result | None:
+    """Undo the declared change; the verdict when it could not be undone, else None.
+
+    A subject that stayed patched outlives the check, so this is never an internal error in
+    Falsetto: it is a verdict of its own, and a front-end can stop the session on it.
+    """
+    try:
+        patch.undo()
+    except passthrough:
+        raise
+    except Exception as e:
+        detail = "; ".join(p for p in (describe_exception(e), location_of(e)) if p)
+        text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+        return Result(Verdict.UNPROVEN, Reason.NOT_REVERTED, declared, detail, _evidence(text))
+    return None
 
 
 def _detail(run: RunResult, why: str | None = None) -> str:
@@ -129,15 +163,26 @@ def prove(
                 Verdict.UNPROVEN, Reason.NOT_REPEATABLE, declared, detail, control.longrepr
             )
 
-    with Patch() as patch:
+    patch = Patch()
+    not_applied: Result | None = None
+    negative: RunResult | None = None
+    try:
         try:
             decl.change(patch)
         except passthrough:
             raise
         except BaseException as e:
             detail = "; ".join(p for p in (describe_exception(e), location_of(e)) if p)
-            return Result(Verdict.UNPROVEN, Reason.NOT_APPLIED, declared, detail)
-        negative = run()
+            not_applied = Result(Verdict.UNPROVEN, Reason.NOT_APPLIED, declared, detail)
+        else:
+            negative = run()
+    finally:
+        not_reverted = _revert(patch, declared, passthrough)
+
+    if not_reverted is not None:
+        return not_reverted
+    if negative is None:
+        return not_applied
 
     if negative.outcome is Outcome.PASSED:
         if wider_fixtures:
@@ -199,6 +244,6 @@ def misconfigured(why: str, decl: Declaration | None) -> Result:
 
 def internal_error(exc: BaseException, decl: Declaration | None) -> Result:
     """The verdict when Falsetto itself failed while grading: unproven, and loud."""
-    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    tb = _evidence("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
     declared = decl.description if decl else None
     return Result(Verdict.UNPROVEN, Reason.INTERNAL_ERROR, declared, describe_exception(exc), tb)

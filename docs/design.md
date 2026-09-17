@@ -42,6 +42,7 @@ A check counts only once it is provably falsifiable. The unit of proof is a decl
 | passes | does not pass | not run | **unproven** | not-repeatable |
 | passes | passes | the change could not be applied | **unproven** | not-applied |
 | passes | passes | passes, and the check uses a suite-defined fixture wider than the scope | **unproven** | out-of-scope (fails the build) |
+| passes | passes | any outcome, but the change could not be undone afterwards | **unproven** | not-reverted (fails the build, and the session stops) |
 | passes | passes | passes | **false** | negative-passed |
 | passes | passes | skipped, or setup or teardown failed | **unproven** | wrong-reason |
 | passes | passes | fails with an unexpected exception | **unproven** | wrong-reason |
@@ -51,7 +52,7 @@ A check counts only once it is provably falsifiable. The unit of proof is a decl
 
 A positive run that was skipped or could not complete yields no verdict; the check is counted in the denominator as skipped or errored, never as a pass.
 
-**False**, **internal-error**, **out-of-scope**, **misconfigured** and, in strict mode, every **unproven** fail the build. They do so by being real failures of the check's own report, so the runner's machinery for stopping, rerunning, reporting and exiting sees them without any side channel. An internal error is appended to the check's own failure text when there is one, never written over it, and it is reported on whatever report exists when there is no call report.
+**False**, **internal-error**, **out-of-scope**, **misconfigured**, **not-reverted** and, in strict mode, every **unproven** fail the build. They do so by being real failures of the check's own report, so the runner's machinery for stopping, rerunning, reporting and exiting sees them without any side channel. An internal error is appended to the check's own failure text when there is one, never written over it, and it is reported on whatever report exists when there is no call report. A not-reverted verdict also stops the session: the change is still applied, so every check after it would run against a patched subject and no verdict from one of them would mean anything. A declared change that cannot be applied, and one that cannot be undone, are verdicts on the declaration, never internal errors in Falsetto.
 
 The verdict line always carries its denominator: `N proven, N failed as written, N false, N unproven (G graded of R run; ...)` with skipped, errored, excluded, xfail, not-gradable, incomplete, not-graded (another plugin ran the protocol) and teardown-failed-after-grading counts when non-zero. In strict mode, a session that ran anything and graded nothing fails, whatever the reason; modes that run nothing are exempt.
 
@@ -79,6 +80,7 @@ Every verdict carries a stable reason code, a sentence, and for non-green verdic
 - **not-repeatable**: build the check's state in fixtures, not at module level.
 - **out-of-scope**: widen `scope=` so the fixtures the check uses are rebuilt under the change.
 - **not-applied**: fix the declared change; nothing is known about the check until it applies.
+- **not-reverted**: nothing after the check in that session can be trusted; make the change's undo path safe, so that whatever it patches accepts its original value back, then rerun.
 - **misconfigured**: give `no_proof` a reason, do not combine it with a declaration, and use a scope the check can have.
 - **internal-error**: a bug in Falsetto or in a hook it called; report it.
 
