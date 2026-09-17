@@ -6,6 +6,8 @@ All notable changes to Falsetto are recorded here. The format follows
 
 ## [Unreleased]
 
+[Unreleased]: https://github.com/nlangman/falsetto/commits/main
+
 ### Added
 - The declaration: `must_fail_when(change, *, expect=None, describe=None, scope="function")`,
   with Falsetto's own patching handle (`Patch`) and a visible expectation in reports.

@@ -40,7 +40,8 @@ only `falsetto.core` computes a verdict.
    status see the positive run's reports with the verdict already on them.
 9. **The session tallies.** `plugin._Session.pytest_runtest_logreport` reads every logged
    report, on the controller under xdist too, and keeps the per-item status: graded,
-   skipped, errored, excluded, xfail, not gradable, or incomplete. The summary section,
+   skipped, errored, excluded, xfail, not gradable, incomplete, not graded because another
+   plugin ran the protocol, or teardown failed after grading. The summary section,
    the verdict line with its denominator, the strict rule, and `--falsetto-json` all read
    that tally.
 

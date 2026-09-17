@@ -26,7 +26,7 @@ change to the subject should make your check fail, the check is not finished.
 
 ## What a change carries
 
-- Code with type annotations. `mypy --strict` is clean on `src/`.
+- Code with type annotations. `mypy --strict` is clean on `src/`, `tests/` and `examples/`.
 - Formatting and lint by `ruff`. No exceptions without a comment saying why.
 - A `CHANGELOG.md` entry under *Unreleased*.
 - If the change touches an increment in `docs/plan.md`, the row's status.

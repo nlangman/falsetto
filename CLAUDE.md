@@ -33,7 +33,7 @@ uv run mypy
 
 Declarations live in `tests/helpers.py` or next to the check, and they target the property
 the check names: a check about the control run declares "no control run", not "everything
-is proven". Three lessons the suite already paid for:
+is proven". Lessons the suite already paid for:
 
 - Never patch the handle's own revert path (`Patch.undo`, `Patch.__exit__`) at class level;
   the outer handle then cannot revert, and every later run leaks. Rebind a module-level

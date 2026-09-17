@@ -53,7 +53,7 @@ A positive run that was skipped or could not complete yields no verdict; the che
 
 **False**, **internal-error**, **out-of-scope**, **misconfigured** and, in strict mode, every **unproven** fail the build. They do so by being real failures of the check's own report, so the runner's machinery for stopping, rerunning, reporting and exiting sees them without any side channel. An internal error is appended to the check's own failure text when there is one, never written over it, and it is reported on whatever report exists when there is no call report.
 
-The verdict line always carries its denominator: `N proven, N failed as written, N false, N unproven (G graded of R run; ...)` with skipped, errored, excluded, xfail, not-gradable and incomplete counts when non-zero. In strict mode, a session that ran anything and graded nothing fails, whatever the reason; modes that run nothing are exempt.
+The verdict line always carries its denominator: `N proven, N failed as written, N false, N unproven (G graded of R run; ...)` with skipped, errored, excluded, xfail, not-gradable, incomplete, not-graded (another plugin ran the protocol) and teardown-failed-after-grading counts when non-zero. In strict mode, a session that ran anything and graded nothing fails, whatever the reason; modes that run nothing are exempt.
 
 ## 5. Vacuity
 
@@ -78,6 +78,9 @@ Every verdict carries a stable reason code, a sentence, and for non-green verdic
 - **wrong-reason**: narrow the change, or pass `expect=` if the failure you see is the one you mean.
 - **not-repeatable**: build the check's state in fixtures, not at module level.
 - **out-of-scope**: widen `scope=` so the fixtures the check uses are rebuilt under the change.
+- **not-applied**: fix the declared change; nothing is known about the check until it applies.
+- **misconfigured**: give `no_proof` a reason, do not combine it with a declaration, and use a scope the check can have.
+- **internal-error**: a bug in Falsetto or in a hook it called; report it.
 
 ## 8. Proof cache
 

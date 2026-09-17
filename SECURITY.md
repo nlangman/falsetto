@@ -1,7 +1,7 @@
 # Security
 
-Falsetto runs a declared test three times and patches your code in-process during the
-third run. It never edits your code or your tests on disk; the only file it writes is
+Falsetto runs a declared test at least three times and patches your code in-process
+during the last run. It never edits your code or your tests on disk; the only file it writes is
 the report you ask for with `--falsetto-json`. It never executes anything it did not
 receive from your own test suite. Still, a bug that made the negative run escape its
 scope would be a security matter, and we treat it as one.
