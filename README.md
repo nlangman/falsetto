@@ -2,7 +2,7 @@
 
 **A green you can trust.**
 
-Falsetto is a pytest plugin that finds bad tests and evals, the ones that cannot fail, and refuses to count them. Agents now write tests and evals at a volume no human can validate by reading. Test runners report pass and fail, and cannot see a test that cannot fail. Mutation tools take hours to edit a whole suite at random and still cannot point at the bad test. Bad tests hand agents and humans a confidence nothing earned.
+Falsetto is a pytest plugin that finds bad tests and evals, the ones that cannot fail, and refuses to count them. Agents now write tests and evals at a volume no human can validate by reading. Test runners report pass and fail, and cannot see a test that cannot fail. Mutation tools edit a whole codebase at random and report which edits survived, which names a gap in the suite rather than the test at fault, and takes hours. Bad tests hand agents and humans a confidence nothing earned.
 
 Falsetto asks each test for one change to the code under test that should make it red, runs the test without that change and then with it, and counts only the tests that fail when they should. The result is a green you can trust: every passing check has been proven able to fail, a check that quietly loses that ability turns the build red, and an agent gets that signal on the run where it happens, not in review.
 
@@ -79,6 +79,14 @@ Agents now write and run tests at scale. A false-green test is the failure that 
 
 - **At authoring.** The agent, or the person, must answer "what change should make this red" before the test exists. Tests written to answer that question are better on the first run. Strict mode makes the answer mandatory.
 - **On vacuity.** A change elsewhere makes a proven test unable to fail, and it slides from proven to false without anyone touching it. Falsetto catches it on the change that did it.
+
+## For coding agents and their harnesses
+
+Falsetto is built to sit inside the loop an agent already runs, with no human in the middle.
+
+- **A gate the agent cannot talk its way past.** In strict mode a test without a declaration, or a declaration that does not bite, is a red build. The agent cannot report green until every check it wrote has been made to fail once. Put `falsetto_strict = true` in the project's pytest configuration and the rule applies to every session, whichever agent is running.
+- **Hints written for the author who has to act.** Every non-green verdict carries a stable reason code, one sentence, and a hint that says what to change: declare the change, narrow it, widen its scope, build the state in fixtures. The agent that wrote the test is the expected reader.
+- **A machine channel.** `--falsetto-json` writes every verdict with its reason, detail and evidence, and the same record rides pytest's `user_properties` into JUnit. A harness reads verdicts without parsing a terminal.
 
 ## Evals too
 

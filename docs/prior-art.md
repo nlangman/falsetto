@@ -1,6 +1,8 @@
 # Prior art
 
-What came before Falsetto, what each thing does, and where Falsetto differs. Written
+What came before Falsetto, what each thing does, and where Falsetto differs. Everything
+here is work Falsetto stands on, and the differences are differences of unit and channel,
+not of merit: each of these tools solves the problem it set out to solve. Written
 2026-09-14. The verification status of each entry is at the end, because a prior-art
 page that overstates its own certainty would be the kind of claim this project exists
 to catch.
@@ -52,7 +54,6 @@ nearest implementation precedent. The differences:
 - The report is per mutant: killed or survived. Falsetto's verdict is per check, and
   it has states a kill count cannot express: **false** (this check cannot fail) and
   **unproven** (nothing is known about this check).
-- Mutagen has not been released since 2020.
 
 ### Extreme mutation and pseudo-tested methods (2016 onward)
 
@@ -68,9 +69,9 @@ common: a mean of 11.41% of methods under unit tests and 35.48% under system tes
 across its study objects, with far more spread among the system-test suites.
 
 Pseudo-testedness is the method-level cousin of Falsetto's **false**: the suite ran the
-code and never checked its effect. The differences: extreme mutation is automatic and
-coarse, and it grades methods and suites. Falsetto's change is declared, specific, and
-grades one check.
+code and never checked its effect. The differences: extreme mutation is automatic, asks
+nothing of the author, and grades methods and suites. Falsetto asks the author for one
+declared change, specific to the check, and grades that check.
 
 ## The wider field
 
