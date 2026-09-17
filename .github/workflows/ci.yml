@@ -43,9 +43,10 @@ jobs:
           uv run --no-sync python - <<'PY'
           import json
           t = json.load(open("verdicts.json"))["totals"]
+          v = t["verdicts"]
           assert t["run"] > 0 and t["graded"] == t["run"], t
-          assert t["false"] == 0 and t["unproven"] == 0 and t["failed"] == 0, t
-          print("graded", t["graded"], "proven", t["proven"])
+          assert v["false"] == 0 and v["unproven"] == 0 and v["failed"] == 0, t
+          print("graded", t["graded"], "proven", v["proven"])
           PY
 
   lint-and-types:
@@ -87,4 +88,4 @@ jobs:
               assert VALUE["key"] == "k1"
           PY
           cd smoke_suite && ../smoke/bin/python -m pytest -p no:cacheprovider --falsetto-strict --falsetto-json=out.json
-          ../smoke/bin/python -c "import json; t=json.load(open('out.json'))['totals']; assert t['proven']==1 and t['graded']==1, t"
+          ../smoke/bin/python -c "import json; t=json.load(open('out.json'))['totals']; assert t['verdicts']['proven']==1 and t['graded']==1, t"

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import itertools
 import json
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
 import falsetto
 import falsetto.plugin as plugin
-from tests.helpers import RUN, changes_never_bite, false_never_fails_the_build, line
+from tests.helpers import RUN, everything_is_proven, false_never_fails_the_build, line
 
 XFAIL = """
 import pytest
@@ -145,14 +148,14 @@ def test_no_proof_and_a_declaration_contradict(pytester: pytest.Pytester) -> Non
 
 
 DOCTEST_AND_A_CHECK = '''
+import falsetto
+
 def double(n):
     """
     >>> double(2)
     4
     """
     return n * 2
-
-import falsetto
 
 @falsetto.must_fail_when(lambda m: m.setattr(__import__(__name__), "double", lambda n: 0))
 def test_double():
@@ -190,7 +193,12 @@ def test_b_proven():
 """
 
 
-@falsetto.must_fail_when(false_never_fails_the_build)
+def verdicts_never_reach_a_report(m: falsetto.Patch) -> None:
+    """Falsifies "a false verdict lands on the report pytest's own tools read"."""
+    m.setattr(plugin, "_attach_target", lambda reports: None)
+
+
+@falsetto.must_fail_when(verdicts_never_reach_a_report)
 def test_stop_on_first_failure_stops_on_a_false_check(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(FALSE_THEN_PROVEN)
     result = pytester.runpytest(*RUN, "-x")
@@ -199,7 +207,7 @@ def test_stop_on_first_failure_stops_on_a_false_check(pytester: pytest.Pytester)
     assert "stopping after 1 failures" in out
 
 
-@falsetto.must_fail_when(false_never_fails_the_build)
+@falsetto.must_fail_when(verdicts_never_reach_a_report)
 def test_last_failed_reruns_only_the_false_check(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(FALSE_THEN_PROVEN)
     pytester.runpytest("--falsetto")
@@ -209,13 +217,14 @@ def test_last_failed_reruns_only_the_false_check(pytester: pytest.Pytester) -> N
     assert "test_b_proven" not in out
 
 
-@falsetto.must_fail_when(false_never_fails_the_build)
+@falsetto.must_fail_when(verdicts_never_reach_a_report)
 def test_junit_counts_a_false_check_as_a_failure(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(FALSE_THEN_PROVEN)
     xml = pytester.path / "junit.xml"
     pytester.runpytest(*RUN, f"--junitxml={xml}")
     text = xml.read_text().replace("&quot;", '"')
     assert 'failures="1"' in text
+    assert plugin.PROPERTY in text
     assert '"verdict": "false"' in text
 
 
@@ -234,7 +243,7 @@ def test_verdicts_survive_xdist_workers(pytester: pytest.Pytester) -> None:
 
 
 def json_is_never_written(m: falsetto.Patch) -> None:
-    m.setattr(plugin._Session, "write_json", lambda self, path: None)
+    m.setattr(plugin._Session, "write_json", lambda self, path, session: None)
 
 
 @falsetto.must_fail_when(json_is_never_written)
@@ -246,11 +255,108 @@ def test_json_report_carries_every_verdict_and_creates_its_directory(
     pytester.runpytest(*RUN, f"--falsetto-json={path}")
     assert path.exists()
     payload = json.loads(path.read_text())
-    assert payload["totals"]["false"] == 1
-    assert payload["totals"]["proven"] == 1
+    assert payload["totals"]["verdicts"]["false"] == 1
+    assert payload["totals"]["verdicts"]["proven"] == 1
     verdicts = {c["nodeid"].split("::")[-1]: c["verdict"] for c in payload["checks"]}
     assert verdicts == {"test_a_false": "false", "test_b_proven": "proven"}
     assert all("hint" in c and "reason" in c and "evidence" in c for c in payload["checks"])
+
+
+CONTEXT_FIELDS = (
+    "schema",
+    "started",
+    "finished",
+    "rootdir",
+    "args",
+    "strict",
+    "controls",
+    "pytest",
+    "python",
+)
+
+
+def the_report_records_no_run_context(m: falsetto.Patch) -> None:
+    """Falsifies "the report says which run it came from": the context fields are not written."""
+    original = plugin._Session.write_json
+
+    def write_json(self: plugin._Session, path: Path, session: pytest.Session) -> None:
+        original(self, path, session)
+        kept = {k: v for k, v in json.loads(path.read_text()).items() if k not in CONTEXT_FIELDS}
+        path.write_text(json.dumps(kept, indent=2))
+
+    m.setattr(plugin._Session, "write_json", write_json)
+
+
+@falsetto.must_fail_when(the_report_records_no_run_context)
+def test_the_json_report_carries_the_run_it_came_from(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(FALSE_THEN_PROVEN)
+    path = pytester.path / "falsetto.json"
+    pytester.runpytest(*RUN, "--falsetto-strict", f"--falsetto-json={path}")
+    payload = json.loads(path.read_text())
+    assert payload.get("schema") == 1
+    assert payload.get("strict") is True
+    assert payload.get("controls") == 1
+    assert payload.get("pytest") == pytest.__version__
+    assert Path(str(payload.get("rootdir"))).resolve() == pytester.path.resolve()
+    assert isinstance(payload.get("started"), str)
+    assert isinstance(payload.get("finished"), str)
+
+
+def the_run_clock_runs_backwards(m: falsetto.Patch) -> None:
+    """Falsifies "the report's timestamps bracket the run": each reading is earlier."""
+    real = plugin._now
+    readings = itertools.count()
+
+    def now() -> str:
+        moment = datetime.fromisoformat(real()) - timedelta(seconds=next(readings))
+        return moment.isoformat(timespec="seconds")
+
+    m.setattr(plugin, "_now", now)
+
+
+@falsetto.must_fail_when(the_run_clock_runs_backwards)
+def test_the_json_reports_timestamps_bracket_the_run(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(FALSE_THEN_PROVEN)
+    path = pytester.path / "falsetto.json"
+    pytester.runpytest(*RUN, f"--falsetto-json={path}")
+    payload = json.loads(path.read_text())
+    started = datetime.fromisoformat(payload["started"])
+    finished = datetime.fromisoformat(payload["finished"])
+    assert started <= finished
+
+
+FALSE_PROVEN_AND_UNDECLARED = """
+import falsetto
+
+VALUE = {"key": "k1"}
+
+@falsetto.must_fail_when(lambda m: m.setitem(VALUE, "key", "zzz"))
+def test_a_false():
+    expected = VALUE["key"]
+    assert VALUE["key"] == expected
+
+@falsetto.must_fail_when(lambda m: m.setitem(VALUE, "key", None))
+def test_b_proven():
+    assert VALUE["key"] == "k1"
+
+def test_c_undeclared():
+    assert VALUE["key"] == "k1"
+"""
+
+
+@falsetto.must_fail_when(false_never_fails_the_build)
+def test_each_record_says_whether_its_verdict_fails_the_build(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makepyfile(FALSE_PROVEN_AND_UNDECLARED)
+    path = pytester.path / "falsetto.json"
+    pytester.runpytest(*RUN, "--falsetto-strict", f"--falsetto-json={path}")
+    payload = json.loads(path.read_text())
+    flags = {c["nodeid"].split("::")[-1]: c["fails_build"] for c in payload["checks"]}
+    assert flags == {"test_a_false": True, "test_b_proven": False, "test_c_undeclared": True}
+    totals = payload["totals"]
+    assert set(totals["verdicts"]) == {"proven", "failed", "false", "unproven"}
+    assert not set(totals["statuses"]) & set(totals["verdicts"])
 
 
 def setup_only_is_a_real_run(m: falsetto.Patch) -> None:
@@ -271,16 +377,30 @@ def pytest_runtest_protocol(item, nextitem):
 """
 
 
-def never_warn(m: falsetto.Patch) -> None:
-    m.setattr(plugin, "_warn_competing_protocols", lambda config: None)
+def the_warning_names_nobody(m: falsetto.Patch) -> None:
+    """Falsifies "the warning names the plugin Falsetto competes with"."""
+
+    def warn(config: pytest.Config) -> None:
+        config.issue_config_time_warning(
+            pytest.PytestWarning(
+                "falsetto and another plugin both take over the test protocol, and "
+                "whichever pytest calls first wins for each check. Checks they run are "
+                "reported as not graded, never as a pass."
+            ),
+            stacklevel=2,
+        )
+
+    m.setattr(plugin, "_warn_competing_protocols", warn)
 
 
-@falsetto.must_fail_when(never_warn)
+@falsetto.must_fail_when(the_warning_names_nobody)
 def test_a_competing_protocol_plugin_is_named_in_a_warning(pytester: pytest.Pytester) -> None:
     pytester.makeconftest(COMPETING_CONFTEST)
     pytester.makepyfile(FALSE_THEN_PROVEN)
     result = pytester.runpytest(*RUN)
-    assert "both take over the test protocol" in result.stdout.str()
+    out = result.stdout.str()
+    assert "both take over the test protocol" in out
+    assert str(pytester.path / "conftest.py") in out
 
 
 STATS_CONFTEST = """
@@ -313,11 +433,41 @@ def test_proven_checks_still_count_as_passed_for_other_reporters(
     assert "PASSED_COUNT 1" in result.stdout.str()
 
 
-@falsetto.must_fail_when(changes_never_bite)
+@falsetto.must_fail_when(everything_is_proven)
 def test_the_router_example_line_is_what_the_readme_promises(pytester: pytest.Pytester) -> None:
-    from pathlib import Path
-
+    """A summary-shaped check: it uses the chokepoint, since every count moves together."""
     example = Path(__file__).resolve().parent.parent / "examples" / "router"
     result = pytester.runpytest(str(example), *RUN)
     assert line(1, 1, 1, 1) + " (4 graded of 4 run)" in result.stdout.str()
     assert result.ret == 1
+
+
+EXITS_ON_RERUN = """
+import falsetto
+import pytest
+
+RUNS = {"n": 0}
+VALUE = {"key": "k1"}
+
+@falsetto.must_fail_when(lambda m: m.setitem(VALUE, "key", None))
+def test_exits_when_it_is_run_again():
+    RUNS["n"] += 1
+    if RUNS["n"] > 1:
+        pytest.exit("stop")
+    assert VALUE["key"] == "k1"
+"""
+
+
+def exits_are_caught_and_graded(m: falsetto.Patch) -> None:
+    """Falsifies "pytest.exit out of a graded run ends the session": it is graded instead."""
+    m.setattr(plugin, "PASSTHROUGH", (KeyboardInterrupt, SystemExit))
+
+
+@falsetto.must_fail_when(exits_are_caught_and_graded)
+def test_pytest_exit_from_a_graded_run_ends_the_session(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(EXITS_ON_RERUN)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+    assert result.ret == pytest.ExitCode.INTERRUPTED
+    assert "stop" in out
+    assert "falsetto:" not in out

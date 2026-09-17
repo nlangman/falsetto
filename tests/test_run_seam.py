@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 import falsetto
@@ -75,7 +77,7 @@ def test_ident_has_the_prefix(ident):
 """
 
 
-@falsetto.must_fail_when(changes_never_bite)
+@falsetto.must_fail_when(boundary_is_the_item)
 def test_a_change_applied_before_setup_reaches_function_fixtures(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(FIXTURE_TARGET)
     result = pytester.runpytest(*RUN)
@@ -182,11 +184,11 @@ def expensive():
 def value(expensive):
     return {"key": "k1"}
 
+FLAG = {"on": True}
+
 @falsetto.must_fail_when(lambda m: m.setitem(FLAG, "on", False))
 def test_uses_a_session_fixture(value):
     assert value["key"] == "k1" and FLAG["on"]
-
-FLAG = {"on": True}
 """
 
 
@@ -257,7 +259,7 @@ class Suite(unittest.TestCase):
 """
 
 
-@falsetto.must_fail_when(changes_never_bite)
+@falsetto.must_fail_when(boundary_is_the_item)
 def test_setupclass_state_is_rebuilt_under_a_class_scoped_declaration(
     pytester: pytest.Pytester,
 ) -> None:
@@ -282,6 +284,7 @@ class TestGroup:
 
 @falsetto.must_fail_when(changes_never_bite)
 def test_class_based_and_parametrized_checks(pytester: pytest.Pytester) -> None:
+    """No tighter falsifier exists: the property is that both items are graded at all."""
     pytester.makepyfile(CLASS_AND_PARAMS)
     result = pytester.runpytest(*RUN)
     assert line(2, 0, 0, 0) + " (2 graded of 2 run)" in result.stdout.str()
@@ -426,6 +429,8 @@ import os
 
 import falsetto.plugin
 
+# Exempt from the rule that a planted conftest restores what it changes: this run is a
+# subprocess, so the rebinding dies with it.
 if os.environ.get("FALSETTO_TEST_COVERAGE_RUNS_THROUGH"):
     falsetto.plugin._coverage_paused = contextlib.nullcontext
 """
@@ -479,3 +484,43 @@ def test_a_check_cannot_forge_its_own_verdict(pytester: pytest.Pytester) -> None
     out = result.stdout.str()
     assert line(0, 0, 1, 0) in out
     assert result.ret == 1
+
+
+SESSION_SCOPE = """
+import falsetto
+import pytest
+
+CONFIG = {"prefix": "id-"}
+COUNT = {"setups": 0}
+
+@pytest.fixture(scope="session")
+def ident():
+    COUNT["setups"] += 1
+    yield CONFIG["prefix"] + "42"
+    print("SESSION_SETUPS", COUNT["setups"])
+
+@falsetto.must_fail_when(lambda m: m.setitem(CONFIG, "prefix", "BROKEN-"), scope="session")
+def test_reads_a_session_fixture(ident):
+    assert ident.startswith("id-")
+"""
+
+
+def session_scope_reaches_no_further_than_function(m: falsetto.Patch) -> None:
+    """Falsifies "scope='session' rebuilds the session's fixtures": that branch is gone."""
+    real = plugin._boundary
+
+    def boundary(item: pytest.Item, scope: str) -> Any:
+        return real(item, "function") if scope == "session" else real(item, scope)
+
+    m.setattr(plugin, "_boundary", boundary)
+
+
+@falsetto.must_fail_when(session_scope_reaches_no_further_than_function)
+def test_a_session_scoped_declaration_rebuilds_a_session_fixture(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makepyfile(SESSION_SCOPE)
+    result = pytester.runpytest(*RUN, "-s")
+    out = result.stdout.str()
+    assert line(1, 0, 0, 0) in out
+    assert "SESSION_SETUPS 3" in out

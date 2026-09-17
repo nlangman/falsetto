@@ -1,7 +1,8 @@
 """Declarations Falsetto's own checks use, each aimed at the property the check names.
 
-A few checks assert only that the verdict line reads a certain way; those use the
-chokepoint at the end and say so. Everything else targets the mechanism it claims to prove.
+A few checks assert what the whole summary reports rather than one mechanism; those use
+the chokepoint at the end and say so. Everything else targets the mechanism it claims to
+prove.
 """
 
 from __future__ import annotations
@@ -22,7 +23,11 @@ def line(proven: int = 0, failed: int = 0, false: int = 0, unproven: int = 0) ->
 
 
 class _InertPatch(Patch):
-    """A handle that changes nothing: declared changes never bite."""
+    """A handle whose setattr and setitem do nothing: a change through either never lands.
+
+    setenv goes through setitem and is neutered with it. delattr, delitem and delenv are
+    not overridden and still bite.
+    """
 
     def setattr(self, target: object, name: str, value: object, raising: bool = True) -> None:
         return None
@@ -71,7 +76,11 @@ def boundary_is_the_session(m: Patch) -> None:
 
 
 def everything_is_proven(m: Patch) -> None:
-    """The chokepoint: every graded check reports proven. Used only by line-shape checks."""
+    """The chokepoint: every graded check reports proven.
+
+    Used only by checks whose subject is the summary itself, where every line of the
+    summary moves together and no narrower change reaches all of them.
+    """
     m.setattr(
         core,
         "prove",

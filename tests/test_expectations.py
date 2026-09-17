@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 import falsetto
@@ -71,7 +73,17 @@ def reject_every_expectation(m: falsetto.Patch) -> None:
     m.setattr(Declaration, "matches", lambda self, exc, default: (False, "rejected"))
 
 
-@falsetto.must_fail_when(reject_every_expectation)
+def expectations_are_ignored(m: falsetto.Patch) -> None:
+    """Falsifies "a declaration's expect= decides the stated reason": the default applies."""
+    original = Declaration.matches
+
+    def matches(self: Declaration, exc: BaseException | None, default: Any) -> tuple[bool, str]:
+        return original(Declaration(self.change), exc, default)
+
+    m.setattr(Declaration, "matches", matches)
+
+
+@falsetto.must_fail_when(expectations_are_ignored)
 def test_expectation_can_name_an_exception_type(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(EXPECTED_TYPE)
     result = pytester.runpytest(*RUN)
@@ -93,7 +105,7 @@ def test_expect_predicate():
 """
 
 
-@falsetto.must_fail_when(reject_every_expectation)
+@falsetto.must_fail_when(expectations_are_ignored)
 def test_expectation_can_be_a_predicate_and_is_shown(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(PREDICATE)
     result = pytester.runpytest(*RUN, "--falsetto-json=out.json")
@@ -184,13 +196,12 @@ def test_x():
 """
 
 
-def describe_nothing(m: falsetto.Patch) -> None:
-    import falsetto.core as core
+def a_skip_from_a_change_passes_through(m: falsetto.Patch) -> None:
+    """Falsifies "a change that skips is not applied": the skip is a passthrough instead."""
+    m.setattr(plugin, "PASSTHROUGH", (*plugin.PASSTHROUGH, pytest.skip.Exception))
 
-    m.setattr(core, "describe_exception", lambda exc: "")
 
-
-@falsetto.must_fail_when(describe_nothing)
+@falsetto.must_fail_when(a_skip_from_a_change_passes_through)
 def test_a_change_that_skips_is_not_applied_rather_than_a_skip(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(IMPORTORSKIP)
     result = pytester.runpytest(*RUN)

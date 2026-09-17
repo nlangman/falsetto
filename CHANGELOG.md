@@ -60,6 +60,9 @@ All notable changes to Falsetto are recorded here. The format follows
   before they reach a report.
 
 ### Changed
+- The JSON report carries `schema: 1`, the run's context (`rootdir`, `args`, `strict`, `controls`,
+  `pytest`, `python`, `started`, `finished`) and `fails_build` on every record; `totals` keeps
+  verdict counts and status counts apart as `verdicts` and `statuses`.
 - After review round one the negative run became a whole fresh protocol with the change
   applied before setup, and proven now requires a passing control run. The own-frame rule
   on assertions was dropped; `pytest.fail` counts as the stated reason by default.

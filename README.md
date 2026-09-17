@@ -84,7 +84,7 @@ Falsetto is built to sit inside the loop an agent already runs, with no human in
 
 - **A gate the agent cannot talk its way past.** In strict mode a test without a declaration, or a declaration that does not bite, is a red build. The agent cannot report green until every check it wrote has been made to fail once. Put `falsetto_strict = true` in the project's pytest configuration and the rule applies to every session, whichever agent is running.
 - **Hints written for the author who has to act.** Every non-green verdict carries a stable reason code, one sentence, and a hint that says what to change: declare the change, narrow it, widen its scope, build the state in fixtures. The agent that wrote the test is the expected reader.
-- **A machine channel.** `--falsetto-json` writes every verdict with its reason, detail and evidence, and the same record rides pytest's `user_properties` into JUnit. A harness reads verdicts without parsing a terminal.
+- **A machine channel.** `--falsetto-json` writes every verdict with its reason, detail, evidence and whether it fails the build, under a schema number and the run's context (root directory, arguments, strict mode, versions, times), and the same record rides pytest's `user_properties` into JUnit. A harness reads verdicts without parsing a terminal. Two things no report can settle: a **false** verdict is consistent with a tautological test and with a product bug the test happens not to see, and an **unproven** verdict cannot know which change the author meant to guard against. Both need the code read.
 
 ## Evals too
 

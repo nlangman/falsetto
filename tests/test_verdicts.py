@@ -6,7 +6,13 @@ import pytest
 
 import falsetto
 import falsetto.plugin as plugin
-from tests.helpers import RUN, changes_never_bite, false_never_fails_the_build, line
+from tests.helpers import (
+    RUN,
+    changes_never_bite,
+    everything_is_proven,
+    false_never_fails_the_build,
+    line,
+)
 
 FOUR = """
 import falsetto
@@ -33,8 +39,9 @@ def test_unproven():
 """
 
 
-@falsetto.must_fail_when(changes_never_bite)
+@falsetto.must_fail_when(everything_is_proven)
 def test_four_verdicts(pytester: pytest.Pytester) -> None:
+    """A summary-shaped check: it uses the chokepoint, since every line below moves with it."""
     pytester.makepyfile(FOUR)
     result = pytester.runpytest(*RUN)
     out = result.stdout.str()

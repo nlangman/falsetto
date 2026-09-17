@@ -42,6 +42,7 @@ def test_dynamic(request):
 @pytest.mark.usefixtures("session_limit")
 @falsetto.must_fail_when(lambda m: m.setitem(CONFIG, "limit", 0))
 def test_usefixtures():
+    # always true: this check must still pass under the change, so its verdict is out of scope
     assert CONFIG["limit"] == 10 or True
 """
 

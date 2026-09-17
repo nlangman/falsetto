@@ -16,7 +16,8 @@ uv run mypy
 
 Any Python 3.10 or newer works. `uv` is the fastest path, but a plain virtual
 environment with `pip install -e . pytest-xdist pytest-cov ruff mypy` is fine; the
-suite's xdist and coverage checks skip themselves when those two plugins are absent.
+suite's xdist and coverage checks skip themselves when those two plugins are absent, and
+a skipped check is one the run did not prove, so a complete local run needs both.
 
 ## The one rule
 

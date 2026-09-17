@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import platform
 import site
 import sysconfig
 import traceback
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
@@ -756,6 +758,13 @@ class Tally:
         return text
 
 
+REPORT_SCHEMA = 1
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 class _Session:
     """Session-level accounting and reporting, registered only when enabled."""
 
@@ -764,9 +773,11 @@ class _Session:
         self.config = config
         self.tally = Tally()
         self.session: pytest.Session | None = None
+        self.started = _now()
 
     def pytest_sessionstart(self, session: pytest.Session) -> None:
         self.session = session
+        self.started = _now()
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         self.tally.note(report)
@@ -831,20 +842,34 @@ class _Session:
     def write_json(self, path: Path, session: pytest.Session) -> None:
         tally = self.tally
         stopped = self.stopped()
+        strict = self.settings.strict
         payload = {
+            "schema": REPORT_SCHEMA,
             "falsetto": __version__,
+            "started": self.started,
+            "finished": _now(),
+            "rootdir": str(self.config.rootpath),
+            "args": list(self.config.invocation_params.args),
+            "strict": strict,
+            "controls": self.settings.controls,
+            "pytest": pytest.__version__,
+            "python": platform.python_version(),
             "complete": stopped is None,
             "stopped": stopped,
             "exitstatus": int(session.exitstatus),
             "totals": {
-                **tally.verdicts(),
+                "verdicts": tally.verdicts(),
                 "graded": tally.graded,
                 "run": tally.run,
-                **tally.statuses(),
+                "statuses": {k: v for k, v in tally.statuses().items() if k != "graded"},
             },
             "line": tally.line(stopped),
             "checks": [
-                {"nodeid": nodeid, **entry.record}
+                {
+                    "nodeid": nodeid,
+                    **entry.record,
+                    "fails_build": _fails_build(Result.from_dict(entry.record), strict),
+                }
                 for nodeid, entry in tally.items.items()
                 if entry.record is not None
             ],
