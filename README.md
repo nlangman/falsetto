@@ -1,10 +1,10 @@
 # Falsetto
 
-**Green means nothing until it can go red.**
+**A green you can trust.**
 
-Falsetto is a test runner that refuses to count a check unless it can prove the check is capable of failing. Agents write tests faster than anyone reads them. Falsetto runs each one again without the bug it claims to catch, then again with it, and only counts the ones that fail when they should.
+Falsetto is a pytest plugin that refuses to count a test until it has proven the test can fail. Coding agents now write tests and evals faster than anyone reads them, and a runner that reports only pass or fail cannot tell a test that guards something from one that passes no matter what. Mutation tools grade a whole suite with thousands of random edits and hours of runtime, and still cannot say which test is wrong. Falsetto asks each test for the one change that should make it red, runs the test without that change and then with it, and counts only the tests that fail when they should. The result is a green you can trust: every passing check has been red once, on purpose, and a test that quietly stops being able to fail turns the build red the day it happens.
 
-Test runners report two states: pass and fail. They hide a third: a test that cannot fail. It stays green because the thing it checks is missing on both sides, or the fixture is empty, or the assertion compares nothing to nothing. Such a test proves nothing, and it looks exactly like a test that proves everything. A falsetto is a voice that sounds high but is not the real voice. Falsetto finds the false voice in your suite, and screams.
+Test runners report two states: pass and fail. They hide a third: a test that cannot fail. It stays green because the thing it checks is missing on both sides, or the fixture is empty, or the assertion compares nothing to nothing. Such a test proves nothing, and it looks exactly like a test that proves everything. A falsetto is a voice that sounds high but is not the real voice. Falsetto finds the false voice in your suite and shouts, loudly, at bad tests and evals.
 
 ## The problem, in one example
 
@@ -33,6 +33,8 @@ The declaration answers one question: what change should make this red? Here it 
 A month later a colleague simplifies the shared fixture in another file, so `msg.thread_key` now defaults to `None`. Every test still passes. This one now asserts `None == None`. Under the declared change it still passes, because a dropped key is also `None`. Falsetto reports it **false** on that pull request, and the build fails. Nobody touched the test. Every other runner said green.
 
 ## How it works
+
+**Green means nothing until it can go red.**
 
 1. **The declaration.** Every check declares one change to the **subject** (the code under test, its input, its fixture, or its environment) that must make the check fail. The change is ordinary code you write, applied through a patching handle that reverts everything afterwards. Nothing is generated, nothing of yours is edited on disk, and no model is involved.
 2. **Three runs.** The check runs as written and must pass. It runs a second time, unchanged, as a whole fresh test with setup and teardown, and must pass again: that control run catches every check that does not pass on its second execution, before a failure could be credited to the change. Then it runs under the declared change, applied before setup, and must fail with an assertion.

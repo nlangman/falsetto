@@ -1,5 +1,5 @@
-"""Falsetto: a test runner that refuses to count a check unless it can prove
-the check is capable of failing."""
+"""Falsetto: a pytest plugin that refuses to count a test until it has proven
+the test can fail."""
 
 from .core import Outcome, RunResult, check, check_callable, prove, run_callable
 from .declaration import SCOPES, Declaration, must_fail_when

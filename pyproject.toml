@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "falsetto"
 dynamic = ["version"]
-description = "A test runner that refuses to count a check unless it can prove the check is capable of failing."
+description = "A pytest plugin that refuses to count a test until it has proven the test can fail."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
