@@ -34,6 +34,19 @@ All notable changes to Falsetto are recorded here. The format follows
 - `scope="package"`; `complete` and `stopped` in the JSON report.
 
 ### Fixed
+- The scope guard no longer suppresses a failure of the fixture manager it asks about
+  dynamically reached fixtures. A lookup that raises is an internal error, which fails the
+  build and asks for a report, rather than a fixture silently not counted and a check
+  reported false that Falsetto could not grade.
+- The pytest requirement is bounded, `pytest>=8.0,<10`: the plugin imports the run protocol
+  from `_pytest` on every pytest run, so a pytest that moves it must be an install failure
+  rather than an import error in an unrelated suite.
+- A `falsetto.verdict` property is validated before it is read: a record whose verdict or
+  reason is not one of Falsetto's is ignored, rather than counted or crashed on in the
+  summary. A well-formed record on an item Falsetto did not grade is still taken at face
+  value; the design record says so.
+- `core.evidence` is public and the pytest adapter calls it instead of slicing for itself,
+  so an empty evidence limit keeps nothing on both paths rather than everything on one.
 - A declared change whose undo raises is the verdict not-reverted, which always fails the build
   and stops the session, rather than an internal error reported as a bug in Falsetto while every
   later check runs against a subject that is still patched.

@@ -125,8 +125,12 @@ def _last_property(report: pytest.TestReport, name: str) -> Any:
 def verdict_of(report: pytest.TestReport) -> dict[str, Any] | None:
     """The verdict record a call or teardown report carries, or None.
 
-    The record Falsetto attached is the last one, so it wins over anything a test or a
-    fixture recorded under the same name.
+    On a check Falsetto graded, the record it attached is the last one, so it wins over
+    anything a test or a fixture recorded under the same name. On an item Falsetto did not
+    grade (excluded, skipped, xfail, or one another plugin ran) there is no record of
+    Falsetto's to win, and whatever the item recorded is all there is. Every record is
+    validated before it is returned, so a malformed one is ignored rather than counted or
+    crashed on; a well-formed one cannot be told apart from Falsetto's own.
     """
     if report.when not in ("call", "teardown"):
         return None
@@ -135,11 +139,11 @@ def verdict_of(report: pytest.TestReport) -> dict[str, Any] | None:
         return None
     try:
         loaded = json.loads(value)
+        if not isinstance(loaded, dict):
+            return None
+        return Result.from_dict(loaded).to_dict()
     except ValueError:
         return None
-    if isinstance(loaded, dict) and "verdict" in loaded and "reason" in loaded:
-        return loaded
-    return None
 
 
 def excluded_reason(report: pytest.TestReport) -> str | None:
@@ -300,7 +304,7 @@ def _observe(
 
 
 def _text(report: pytest.TestReport) -> str:
-    return report.longreprtext[-core.EVIDENCE_LIMIT :]
+    return core.evidence(report.longreprtext)
 
 
 def _scope_applies(item: pytest.Item, scope: str) -> str | None:
@@ -332,6 +336,7 @@ def _site_dirs() -> tuple[str, ...]:
     dirs: set[str] = set()
     with contextlib.suppress(Exception):
         dirs.update(site.getsitepackages())
+    with contextlib.suppress(Exception):
         dirs.add(site.getusersitepackages())
     paths = sysconfig.get_paths()
     dirs.update(paths[k] for k in ("purelib", "platlib", "stdlib", "platstdlib") if k in paths)
@@ -356,7 +361,10 @@ def _is_infrastructure(fixturedef: Any) -> bool:
 def _wider_fixtures(item: pytest.Item, scope: str) -> list[str]:
     """Fixtures the check used, by any route, that the declaration's scope does not rebuild.
 
-    Fixtures defined by pytest or installed plugins are infrastructure and never count.
+    Fixtures defined by pytest or installed plugins are infrastructure and never count. A
+    fixture reached dynamically is known only to the fixture manager, and a failure to ask it
+    is not survivable: a fixture missed here is a check reported false that Falsetto could not
+    grade, so the exception travels to the internal-error verdict instead.
     """
     info = getattr(item, "_fixtureinfo", None)
     if info is None:
@@ -370,8 +378,7 @@ def _wider_fixtures(item: pytest.Item, scope: str) -> list[str]:
     for name in sorted(names):
         defs = name2defs.get(name)
         if not defs:
-            with contextlib.suppress(Exception):
-                defs = item.session._fixturemanager.getfixturedefs(name, item)
+            defs = item.session._fixturemanager.getfixturedefs(name, item)
         if not defs:
             continue
         fixturedef = defs[-1]
@@ -433,6 +440,9 @@ def _grade(
     reason: str | None,
     settings: Settings,
 ) -> Result | None:
+    # Both seams are bound once, here, before the declared change is applied. A change that
+    # patches _observe or runtestprotocol must reach the runs it declares against without
+    # also rewriting how this check's own negative run is performed and observed.
     observe, protocol = _observe, runtestprotocol
     if reason is not None and not reason:
         return core.misconfigured("the no_proof marker carries no reason", decl)

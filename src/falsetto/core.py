@@ -47,6 +47,20 @@ PASSTHROUGH: Passthrough = (KeyboardInterrupt, SystemExit)
 DEFAULT_EXPECT: ExceptionTypes = (AssertionError,)
 EVIDENCE_LIMIT = 4000
 
+__all__ = [
+    "Outcome",
+    "Result",
+    "RunResult",
+    "check",
+    "check_callable",
+    "evidence",
+    "internal_error",
+    "misconfigured",
+    "prove",
+    "report_path",
+    "run_callable",
+]
+
 
 def describe_exception(exc: BaseException) -> str:
     text = str(exc).strip().splitlines()
@@ -84,8 +98,12 @@ def location_of(exc: BaseException) -> str | None:
     return f"{report_path(frames[-1].filename)}:{frames[-1].lineno}"
 
 
-def _evidence(text: str) -> str:
-    """The tail of a failure's text, bounded; an empty limit keeps nothing."""
+def evidence(text: str) -> str:
+    """The tail of a failure's text, bounded; an empty limit keeps nothing.
+
+    The guard is the point: ``text[-0:]`` is the whole string, so a front-end that slices
+    for itself keeps everything exactly where it meant to keep nothing.
+    """
     return text[-EVIDENCE_LIMIT:] if EVIDENCE_LIMIT else ""
 
 
@@ -97,7 +115,7 @@ def run_callable(fn: Callable[[], object], passthrough: Passthrough = PASSTHROUG
         raise
     except BaseException as e:
         text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-        return RunResult(Outcome.FAILED, e, location_of(e), describe_exception(e), _evidence(text))
+        return RunResult(Outcome.FAILED, e, location_of(e), describe_exception(e), evidence(text))
     return RunResult(Outcome.PASSED)
 
 
@@ -114,7 +132,7 @@ def _revert(patch: Patch, declared: str | None, passthrough: Passthrough) -> Res
     except Exception as e:
         detail = "; ".join(p for p in (describe_exception(e), location_of(e)) if p)
         text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-        return Result(Verdict.UNPROVEN, Reason.NOT_REVERTED, declared, detail, _evidence(text))
+        return Result(Verdict.UNPROVEN, Reason.NOT_REVERTED, declared, detail, evidence(text))
     return None
 
 
@@ -244,6 +262,6 @@ def misconfigured(why: str, decl: Declaration | None) -> Result:
 
 def internal_error(exc: BaseException, decl: Declaration | None) -> Result:
     """The verdict when Falsetto itself failed while grading: unproven, and loud."""
-    tb = _evidence("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+    tb = evidence("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
     declared = decl.description if decl else None
     return Result(Verdict.UNPROVEN, Reason.INTERNAL_ERROR, declared, describe_exception(exc), tb)

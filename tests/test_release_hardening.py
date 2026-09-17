@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import json
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -146,7 +147,7 @@ def test_a_huge_predicate_repr_is_clamped() -> None:
 
 def evidence_is_unbounded(m: Patch) -> None:
     """Falsifies "an internal error's traceback is evidence, and evidence is bounded"."""
-    m.setattr(core, "_evidence", lambda text: text)
+    m.setattr(core, "evidence", lambda text: text)
 
 
 @falsetto.must_fail_when(evidence_is_unbounded)
@@ -278,3 +279,141 @@ def test_a_location_inside_the_working_directory_is_relative(pytester: pytest.Py
     assert record["reason"] == "not-applied"
     where = str(record["detail"]).split("; ")[-1]
     assert where.startswith("test_location.py:")
+
+
+FORGED_VERDICT = """
+import pytest
+
+
+@pytest.mark.no_proof("talks to a live service")
+def test_excluded(record_property):
+    record_property("falsetto.verdict", '{"verdict": "bogus", "reason": "stated-reason"}')
+"""
+
+
+def records_are_taken_at_face_value(m: Patch) -> None:
+    """Falsifies "a record that is not a verdict Falsetto could have written is ignored"."""
+
+    def unvalidated(report: pytest.TestReport) -> dict[str, Any] | None:
+        if report.when not in ("call", "teardown"):
+            return None
+        value = plugin._last_property(report, plugin.PROPERTY)
+        if not isinstance(value, str):
+            return None
+        try:
+            loaded = json.loads(value)
+        except ValueError:
+            return None
+        if isinstance(loaded, dict) and "verdict" in loaded and "reason" in loaded:
+            return loaded
+        return None
+
+    m.setattr(plugin, "verdict_of", unvalidated)
+
+
+@falsetto.must_fail_when(records_are_taken_at_face_value)
+def test_a_verdict_a_check_wrote_for_itself_is_not_a_verdict(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(FORGED_VERDICT)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+    assert "INTERNALERROR" not in out
+    assert line(0, 0, 0, 0) in out
+    assert "(0 graded of 1 run; 1 excluded)" in out
+    assert result.ret == 0
+
+
+NOT_REPEATABLE = """
+import falsetto
+
+CALLS = []
+
+
+@falsetto.must_fail_when(lambda m: None)
+def test_counts_itself():
+    CALLS.append(1)
+    assert len(CALLS) == 1
+"""
+
+
+def the_front_end_slices_for_itself(m: Patch) -> None:
+    """Falsifies "the plugin's evidence honours an empty limit": a zero slice keeps it all."""
+    m.setattr(plugin, "_text", lambda report: report.longreprtext[-core.EVIDENCE_LIMIT :])
+
+
+@falsetto.must_fail_when(the_front_end_slices_for_itself)
+def test_an_empty_evidence_limit_keeps_no_evidence(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(NOT_REPEATABLE)
+    report = pytester.path / "falsetto.json"
+    with Patch() as patch:
+        patch.setattr(core, "EVIDENCE_LIMIT", 0)
+        pytester.runpytest(*RUN, f"--falsetto-json={report}")
+    record = json.loads(report.read_text())["checks"][0]
+
+    assert record["reason"] == "not-repeatable"
+    assert record["evidence"] == ""
+
+
+BROKEN_FIXTURE_MANAGER = """
+import sys
+
+import _pytest.fixtures
+
+_original = _pytest.fixtures.FixtureManager.getfixturedefs
+
+
+def _refuse_falsetto(self, argname, node):
+    if sys._getframe(1).f_code.co_name == "_wider_fixtures":
+        raise RuntimeError("the fixture manager could not be asked")
+    return _original(self, argname, node)
+
+
+def pytest_configure(config):
+    _pytest.fixtures.FixtureManager.getfixturedefs = _refuse_falsetto
+
+
+def pytest_unconfigure(config):
+    _pytest.fixtures.FixtureManager.getfixturedefs = _original
+"""
+
+DYNAMIC_WIDER_FIXTURE = """
+import falsetto
+import pytest
+
+CONFIG = {"prefix": "id-"}
+
+
+@pytest.fixture(scope="module")
+def ident():
+    return CONFIG["prefix"] + "42"
+
+
+@falsetto.must_fail_when(lambda m: m.setitem(CONFIG, "prefix", "BROKEN-"))
+def test_reads_a_module_fixture_dynamically(request):
+    assert request.getfixturevalue("ident").startswith("id-")
+"""
+
+
+def the_fixture_lookup_swallows_its_failure(m: Patch) -> None:
+    """Falsifies "a fixture Falsetto could not look up is an error, never a false verdict"."""
+    real = plugin._wider_fixtures
+
+    def wider(item: pytest.Item, scope: str) -> list[str]:
+        with contextlib.suppress(Exception):
+            return real(item, scope)
+        return []
+
+    m.setattr(plugin, "_wider_fixtures", wider)
+
+
+@falsetto.must_fail_when(the_fixture_lookup_swallows_its_failure)
+def test_a_fixture_lookup_that_fails_is_not_a_false_verdict(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(BROKEN_FIXTURE_MANAGER)
+    pytester.makepyfile(DYNAMIC_WIDER_FIXTURE)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+
+    assert "FALSETTO-ERROR" in out
+    assert "the fixture manager could not be asked" in out
+    assert "FALSE" not in out.replace("FALSETTO-ERROR", "")
+    assert line(0, 0, 0, 1) in out
+    assert result.ret == 1

@@ -2,7 +2,7 @@
 the test can fail."""
 
 from .core import Outcome, RunResult, check, check_callable, prove, run_callable
-from .declaration import SCOPES, Declaration, must_fail_when
+from .declaration import SCOPES, Declaration, get_declaration, must_fail_when
 from .patching import Patch
 from .verdict import Reason, Result, Verdict
 
@@ -19,6 +19,7 @@ __all__ = [
     "__version__",
     "check",
     "check_callable",
+    "get_declaration",
     "must_fail_when",
     "prove",
     "run_callable",

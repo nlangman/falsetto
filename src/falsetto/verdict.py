@@ -118,6 +118,27 @@ class Result:
     def hint(self) -> str | None:
         return HINTS.get(self.reason)
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Result:
+        """The result a record describes; ``ValueError`` when it is not one Falsetto wrote.
+
+        A record travels on `user_properties`, which anything in the session can write to,
+        so the verdict and the reason are checked against the enums before a reader counts
+        the record, and the sentence and the hint are rebuilt from the reason rather than
+        taken from the record.
+        """
+        verdict = data.get("verdict")
+        reason = data.get("reason")
+        if not isinstance(verdict, str) or not isinstance(reason, str):
+            raise ValueError("a verdict record names its verdict and its reason")
+        declared = data.get("declared")
+        detail = data.get("detail")
+        evidence = data.get("evidence")
+        for text in (declared, detail, evidence):
+            if text is not None and not isinstance(text, str):
+                raise ValueError("declared, detail and evidence are text when they are present")
+        return cls(Verdict(verdict), Reason(reason), declared, detail, evidence)
+
     def to_dict(self) -> dict[str, Any]:
         """A plain, serializable record of this result."""
         return {

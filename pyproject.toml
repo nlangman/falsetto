@@ -27,7 +27,7 @@ classifiers = [
   "Topic :: Software Development :: Testing",
   "Typing :: Typed",
 ]
-dependencies = ["pytest>=8.0"]
+dependencies = ["pytest>=8.0,<10"]
 
 [project.urls]
 Homepage = "https://github.com/nlangman/falsetto"
