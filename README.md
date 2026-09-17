@@ -2,7 +2,7 @@
 
 **Green means nothing until it can go red.**
 
-Falsetto is a test runner that refuses to count a check unless it can prove the check is capable of failing. Agents write tests faster than anyone reads them. Falsetto runs each one again with the bug it claims to catch, and once more without it, and only counts the ones that fail when they should.
+Falsetto is a test runner that refuses to count a check unless it can prove the check is capable of failing. Agents write tests faster than anyone reads them. Falsetto runs each one again without the bug it claims to catch, then again with it, and only counts the ones that fail when they should.
 
 Test runners report two states: pass and fail. They hide a third: a test that cannot fail. It stays green because the thing it checks is missing on both sides, or the fixture is empty, or the assertion compares nothing to nothing. Such a test proves nothing, and it looks exactly like a test that proves everything. A falsetto is a voice that sounds high but is not the real voice. Falsetto finds the false voice in your suite, and screams.
 
@@ -14,9 +14,11 @@ A message router copies a thread key from the incoming message onto the outgoing
 import falsetto
 import router
 
+_original_pick_route = router.pick_route
+
 
 def pick_route_dropping_thread_key(msg):
-    route = original_pick_route(msg)
+    route = _original_pick_route(msg)
     return router.Route(thread_key=None, queue=route.queue)
 
 
@@ -41,7 +43,7 @@ A month later a colleague simplifies the shared fixture in another file, so `msg
 | **proven** | Passed as written, passed again without the change, and failed under it. |
 | **failed** | Failed as written. An ordinary red check. |
 | **false** | Passed as written, and still passed under its declared change. The check is wrong. **This fails the build.** |
-| **unproven** | Nothing is known yet: no declaration, or no failure could be attributed to the change. Fails the build in strict mode. Two kinds always fail the build: **out of scope** (the check uses a fixture wider than its declaration rebuilds, so the change may never have reached it) and **misconfigured** (a declaration or marker that contradicts itself). |
+| **unproven** | Nothing is known yet: no declaration, or no failure could be attributed to the change. Fails the build in strict mode. Three kinds always fail the build: **out of scope** (the check uses a fixture wider than its declaration rebuilds, so the change may never have reached it), **misconfigured** (a declaration or marker that contradicts itself), and **internal error** (Falsetto itself failed while grading). |
 
 ```mermaid
 flowchart TD
@@ -81,7 +83,7 @@ An evaluation cell is a check. Its declared change is a planted wrong answer or 
 ## Using it
 
 ```
-pip install -e .            # from a clone; not yet on PyPI
+pip install -e .            # from a clone; the name is reserved on PyPI, nothing is published yet
 pytest --falsetto           # grade every function-based check
 pytest --falsetto-strict    # and count unproven checks as failures
 pytest --falsetto --falsetto-json=verdicts.json
@@ -97,7 +99,7 @@ falsetto_strict = true
 
 Falsetto is inert unless enabled. A check that cannot be proven on purpose, such as one that talks to a live service, is excluded with `@pytest.mark.no_proof("reason")`; the reason is required, the check is listed by name in the summary, it is counted as excluded in the verdict line, and it is never a pass. In strict mode a session that ran checks and graded none fails, whatever the reason.
 
-**The declaration.** `@falsetto.must_fail_when(change, *, expect=None, describe=None, scope="function")`. `change` receives a handle with `setattr`, `setitem`, `delattr`, `delitem`, `setenv` and `delenv`; everything it does is undone after the run, and a class attribute comes back as the descriptor it was. By default the check must fail with an `AssertionError` or a `pytest.fail`; any other exception is "wrong reason", never proof. Pass `expect=SomeError` when the failure you mean is a different one. Pass `describe="..."` to name the change in reports; without it the change's source text is printed, so anything sensitive in a change, such as a credential passed to `setenv`, needs a `describe`. `scope` says how deep the change reaches: which fixture scopes ("function", "class", "module", "package" or "session") are rebuilt under it for every run. The default rebuilds only function-scoped fixtures. A check that uses a fixture wider than that, by any route, and still passes under the change is reported out of scope with the fixture named, and that fails the build: the check cannot be graded under its declaration until the scope is widened or the check reads the subject directly. Fixtures pytest or an installed plugin defines never count. `scope="session"` rebuilds the session's fixtures for that check and for every test after it, so a suite whose later tests rely on state accumulated in session fixtures sees it reset.
+**The declaration.** `@falsetto.must_fail_when(change, *, expect=None, describe=None, scope="function")`. `change` receives a handle with `setattr`, `setitem`, `delattr`, `delitem`, `setenv` and `delenv`; everything it does is undone after the run, and a class attribute comes back as the descriptor it was. By default the check must fail with an `AssertionError` or a `pytest.fail`; any other exception is "wrong reason", never proof. Pass `expect=SomeError` when the failure you mean is a different one. Pass `describe="..."` to name the change in reports; without it a named function is reported by its qualified name and a lambda by its source text, so anything sensitive in a lambda, such as a credential passed to `setenv`, needs a `describe`. `scope` says how deep the change reaches: which fixture scopes ("function", "class", "module", "package" or "session") are rebuilt under it for every run. The default rebuilds only function-scoped fixtures. A check that uses a fixture wider than that, by any route, and still passes under the change is reported out of scope with the fixture named, and that fails the build: the check cannot be graded under its declaration until the scope is widened or the check reads the subject directly. Fixtures pytest or an installed plugin defines never count. `scope="session"` rebuilds the session's fixtures for that check and for every test after it, so a suite whose later tests rely on state accumulated in session fixtures sees it reset.
 
 **Beyond pytest.** `falsetto.check_callable(fn, declaration)` grades a plain callable with the same four verdicts, for a bespoke harness. Its default expectation is `AssertionError` alone; pass `default_expect=` to widen it. The pytest plugin is one adapter over that core; nothing else computes a verdict.
 

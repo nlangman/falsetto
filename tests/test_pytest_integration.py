@@ -225,6 +225,7 @@ def verdicts_vanish_in_the_controller(m: falsetto.Patch) -> None:
 
 @falsetto.must_fail_when(verdicts_vanish_in_the_controller)
 def test_verdicts_survive_xdist_workers(pytester: pytest.Pytester) -> None:
+    pytest.importorskip("xdist")
     pytester.makepyfile(FALSE_THEN_PROVEN)
     result = pytester.runpytest(*RUN, "-n", "2")
     out = result.stdout.str()
