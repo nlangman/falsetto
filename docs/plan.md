@@ -14,7 +14,7 @@ Increments in order. Each names the check that proves it and leaves the tree gre
 | 4 | Eval falsifier with a fake judge | A judge that scores garbage high reports the eval false | |
 | 5 | Proof cache with a deliberately coarse key | A second run skips negative runs; a change to a fixture file in another directory re-runs them | |
 | 6 | Agent-session integration over the JSON report | An unproven or false hint surfaces inside an agent's authoring session | |
-| 7 | Public release: README for strangers, package name, history sweep, visibility flip | The leak gate over the full history is clean, and proven red on a planted term first | next |
+| 7 | Public release: README for strangers, package name, history sweep, visibility flip | The leak gate over the full history is clean, and proven red on a planted term first | done 2026-09-18: public, CI green on 13 cells, 0.0.1 on PyPI through trusted publishing |
 
 ## Order
 

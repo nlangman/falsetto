@@ -93,7 +93,7 @@ An evaluation cell is a check. Its declared change is a planted wrong answer or 
 ## Using it
 
 ```
-pip install -e .            # from a clone; the name is reserved on PyPI, nothing is published yet
+pip install falsetto        # or pip install -e . from a clone
 pytest --falsetto           # grade every function-based check
 pytest --falsetto-strict    # and count unproven checks as failures
 pytest --falsetto --falsetto-json=verdicts.json
@@ -123,7 +123,7 @@ Costs to know about: a declared check takes about three times as long, `--durati
 
 ## Status
 
-Pre-alpha, installable from source. The design is in [docs/design.md](docs/design.md), the execution path in [docs/how-it-works.md](docs/how-it-works.md), the build plan in [docs/plan.md](docs/plan.md), and what came before in [docs/prior-art.md](docs/prior-art.md). The router example under `examples/router` prints one check per verdict:
+Pre-alpha, released on PyPI as 0.0.1 on 2026-09-18. The design is in [docs/design.md](docs/design.md), the execution path in [docs/how-it-works.md](docs/how-it-works.md), the build plan in [docs/plan.md](docs/plan.md), and what came before in [docs/prior-art.md](docs/prior-art.md). The router example under `examples/router` prints one check per verdict:
 
 ```
 pytest examples/router --falsetto
