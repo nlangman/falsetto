@@ -6,7 +6,11 @@ All notable changes to Falsetto are recorded here. The format follows
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/nlangman/falsetto/commits/main
+Nothing yet.
+
+## [0.0.1] - 2026-09-18
+
+The first release: the declaration, the runner-agnostic core, the pytest adapter, the JSON report, and the router example, all described below.
 
 ### Added
 - The declaration: `must_fail_when(change, *, expect=None, describe=None, scope="function")`,
@@ -95,3 +99,6 @@ All notable changes to Falsetto are recorded here. The format follows
   post-grading teardown failure is merged into the check's own teardown report; the
   debugger plugins are paused during graded runs; an unwritable JSON report is an
   internal-error exit.
+
+[Unreleased]: https://github.com/nlangman/falsetto/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/nlangman/falsetto/releases/tag/v0.0.1
