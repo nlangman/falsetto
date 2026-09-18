@@ -513,7 +513,15 @@ def test_forges_its_own_verdict(record_property):
 """
 
 
-def first_record_wins(m: falsetto.Patch) -> None:
+def a_forged_record_decides_the_verdict(m: falsetto.Patch) -> None:
+    """Falsifies "a graded check cannot forge its own verdict".
+
+    Two things stop it, and a forgery lands only if both go: the report hook strips every
+    record under Falsetto's own names as the report is made, and the read takes the last
+    record, which is the one Falsetto appended after that.
+    """
+    m.setattr(plugin, "_strip_foreign_records", lambda report: None)
+
     def first(report, name):  # type: ignore[no-untyped-def]
         for prop_name, value in report.user_properties:
             if prop_name == name:
@@ -523,7 +531,7 @@ def first_record_wins(m: falsetto.Patch) -> None:
     m.setattr(plugin, "_last_property", first)
 
 
-@falsetto.must_fail_when(first_record_wins)
+@falsetto.must_fail_when(a_forged_record_decides_the_verdict)
 def test_a_check_cannot_forge_its_own_verdict(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(FORGED)
     result = pytester.runpytest(*RUN)

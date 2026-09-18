@@ -378,6 +378,81 @@ def test_a_location_inside_the_working_directory_is_relative(pytester: pytest.Py
     assert where.startswith("test_location.py:")
 
 
+FORGED_PROVEN = """
+import pytest
+
+
+@pytest.mark.no_proof("talks to a live service")
+def test_excluded(record_property):
+    record_property("falsetto.verdict", '{"verdict": "proven", "reason": "stated-reason"}')
+"""
+
+
+def forged_records_are_left_on_the_report(m: Patch) -> None:
+    """Falsifies "a record under one of Falsetto's names never reaches a reader": it is kept."""
+    m.setattr(plugin, "_strip_foreign_records", lambda report: None)
+
+
+@falsetto.must_fail_when(forged_records_are_left_on_the_report)
+def test_an_ungraded_check_cannot_forge_a_verdict_for_itself(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(test_forgery=FORGED_PROVEN)
+    report = pytester.path / "falsetto.json"
+    xml = pytester.path / "junit.xml"
+    result = pytester.runpytest(*RUN, f"--falsetto-json={report}", f"--junitxml={xml}")
+    out = result.stdout.str()
+
+    assert line(0, 0, 0, 0) in out
+    assert "(0 graded of 1 run; 1 excluded)" in out
+    assert "EXCLUDED test_forgery.py::test_excluded: talks to a live service" in out
+    payload = json.loads(report.read_text())
+    assert payload["checks"] == []
+    assert [c["nodeid"] for c in payload["not_graded"]] == ["test_forgery.py::test_excluded"]
+    assert plugin.PROPERTY not in xml.read_text().replace("&quot;", '"')
+    assert result.ret == 0
+
+
+KEEP_FORGED_RECORDS = "FALSETTO_TEST_KEEP_FORGED_RECORDS"
+
+NO_STRIPPING_CONFTEST = f"""
+import os
+
+import falsetto.plugin
+
+_original = falsetto.plugin._strip_foreign_records
+
+
+def pytest_configure(config):
+    if os.environ.get({KEEP_FORGED_RECORDS!r}):
+        falsetto.plugin._strip_foreign_records = lambda report: None
+
+
+def pytest_unconfigure(config):
+    falsetto.plugin._strip_foreign_records = _original
+"""
+
+
+def the_worker_keeps_forged_records(m: Patch) -> None:
+    """Falsifies "the stripping happens where the report is made": the worker keeps them.
+
+    Under xdist the report is made in a worker subprocess, which a change patched here
+    cannot reach, so the planted conftest carries it across on an environment variable.
+    """
+    m.setenv(KEEP_FORGED_RECORDS, "1")
+
+
+@falsetto.must_fail_when(the_worker_keeps_forged_records)
+def test_a_forged_verdict_does_not_survive_an_xdist_worker(pytester: pytest.Pytester) -> None:
+    pytest.importorskip("xdist")
+    pytester.makeconftest(NO_STRIPPING_CONFTEST)
+    pytester.makepyfile(test_forgery=FORGED_PROVEN)
+    result = pytester.runpytest(*RUN, "-n", "2")
+    out = result.stdout.str()
+
+    assert line(0, 0, 0, 0) in out
+    assert "(0 graded of 1 run; 1 excluded)" in out
+    assert result.ret == 0
+
+
 FORGED_VERDICT = """
 import pytest
 
@@ -388,8 +463,14 @@ def test_excluded(record_property):
 """
 
 
-def records_are_taken_at_face_value(m: Patch) -> None:
-    """Falsifies "a record that is not a verdict Falsetto could have written is ignored"."""
+def a_malformed_record_is_counted(m: Patch) -> None:
+    """Falsifies "a record that is not a verdict Falsetto could have written is ignored".
+
+    Two things stop it, and it is counted only if both go: the report hook strips every
+    record under Falsetto's own names as the report is made, and what survives is
+    validated against the enums before any reader counts it.
+    """
+    m.setattr(plugin, "_strip_foreign_records", lambda report: None)
 
     def unvalidated(report: pytest.TestReport) -> dict[str, Any] | None:
         if report.when not in ("call", "teardown"):
@@ -408,7 +489,7 @@ def records_are_taken_at_face_value(m: Patch) -> None:
     m.setattr(plugin, "verdict_of", unvalidated)
 
 
-@falsetto.must_fail_when(records_are_taken_at_face_value)
+@falsetto.must_fail_when(a_malformed_record_is_counted)
 def test_a_verdict_a_check_wrote_for_itself_is_not_a_verdict(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(FORGED_VERDICT)
     result = pytester.runpytest(*RUN)

@@ -48,6 +48,8 @@ if TYPE_CHECKING:
 PROPERTY = "falsetto.verdict"
 EXCLUDED_PROPERTY = "falsetto.excluded"
 GRADABLE_PROPERTY = "falsetto.gradable"
+FORGEABLE_PROPERTIES = (PROPERTY, EXCLUDED_PROPERTY)
+"""The names Falsetto writes on a report itself, and so refuses to read from anyone else."""
 MARKER = "no_proof"
 DEFAULT_EXPECT: tuple[type[BaseException], ...] = (AssertionError, pytest.fail.Exception)
 PASSTHROUGH: tuple[type[BaseException], ...] = (
@@ -127,12 +129,14 @@ def _last_property(report: pytest.TestReport, name: str) -> Any:
 def verdict_of(report: pytest.TestReport) -> dict[str, Any] | None:
     """The verdict record a call or teardown report carries, or None.
 
-    On a check Falsetto graded, the record it attached is the last one, so it wins over
-    anything a test or a fixture recorded under the same name. On an item Falsetto did not
-    grade (excluded, skipped, xfail, or one another plugin ran) there is no record of
-    Falsetto's to win, and whatever the item recorded is all there is. Every record is
-    validated before it is returned, so a malformed one is ignored rather than counted or
-    crashed on; a well-formed one cannot be told apart from Falsetto's own.
+    Only Falsetto writes this record. Every entry under one of Falsetto's own names is
+    stripped from the report as it is made, on whichever process ran the item, and
+    Falsetto appends its own afterwards and only when it graded the item, so a record
+    reaching here is one Falsetto wrote. That holds on an item it did not grade too: a
+    check that records a well-formed verdict for itself no longer has one to be counted.
+    The record is still validated before it is returned and still read last-wins, so a
+    malformed one is ignored rather than counted or crashed on, and a record from some
+    path neither of those covers cannot decide a verdict on its own.
     """
     if report.when not in ("call", "teardown"):
         return None
@@ -256,16 +260,36 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.user_properties.append((GRADABLE_PROPERTY, "1"))
 
 
+def _strip_foreign_records(report: pytest.TestReport) -> None:
+    """Drop every entry under a name Falsetto writes, before Falsetto writes its own.
+
+    ``user_properties`` is a channel anything in the session can write to, so a check
+    could otherwise describe its own verdict, and on an item Falsetto did not grade there
+    would be no record of Falsetto's to win over it. This runs where the report is made,
+    which is the worker under xdist, and Falsetto appends its own record after it and only
+    for an item it graded. The only record that leaves is therefore Falsetto's, and the
+    controller needs no secret crossing the process boundary to trust one.
+
+    A record a test wrote under these names is dropped rather than kept under another:
+    the names are Falsetto's, and a copy under one of them is a verdict to every reader.
+    """
+    report.user_properties = [
+        (name, value) for name, value in report.user_properties if name not in FORGEABLE_PROPERTIES
+    ]
+
+
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[None]
 ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
     report = yield
-    if call.when == "call" and _settings(item.config).enabled:
-        item.stash[EXCINFO] = call.excinfo
-        request = getattr(item, "_request", None)
-        names = getattr(request, "fixturenames", None) if request else None
-        item.stash[FIXTURES] = tuple(names) if names else ()
+    if _settings(item.config).enabled:
+        _strip_foreign_records(report)
+        if call.when == "call":
+            item.stash[EXCINFO] = call.excinfo
+            request = getattr(item, "_request", None)
+            names = getattr(request, "fixturenames", None) if request else None
+            item.stash[FIXTURES] = tuple(names) if names else ()
     return report
 
 

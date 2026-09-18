@@ -64,6 +64,13 @@ All notable changes to Falsetto are recorded here. The format follows
   reported as a bug in Falsetto while every later check runs against a subject that is still
   patched. The catch that applies a declared change and the catch that undoes it are now the
   same width.
+- A check can no longer forge a verdict for itself by recording a `falsetto.verdict` property.
+  Every entry under one of Falsetto's own names is stripped from a report as it is made, on
+  whichever process ran the item, and Falsetto appends its own afterwards and only for an item
+  it graded. This closes the case the design record carried as an open limit, an item Falsetto
+  did not grade and so had no record of its own to win with, and it needs no secret crossing the
+  xdist boundary. A record a test wrote under those names is dropped rather than renamed, so it
+  no longer reaches JUnit output; a name outside the `falsetto.` prefix is untouched.
 - A `Reason` with no sentence in `MESSAGES` is refused when `falsetto.verdict` loads, rather
   than a `KeyError` raised while a report is written, on the failure path, long after the
   reason was added. `MESSAGES` and `HINTS` are read-only mappings.
