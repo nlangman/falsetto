@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from xml.etree import ElementTree
 
 import pytest
 
@@ -284,7 +285,9 @@ def test_a_teardown_failure_after_grading_is_one_error_on_the_same_testcase(
     out = result.stdout.str()
     assert "1 teardown failed after grading" in out
     assert "module teardown failed after grading" in out
-    assert 'tests="1"' in xml.read_text()
+    testcases = list(ElementTree.parse(xml).getroot().iter("testcase"))
+    assert len(testcases) == 1
+    assert len(testcases[0].findall("error")) == 1
     assert result.ret == 1
 
 

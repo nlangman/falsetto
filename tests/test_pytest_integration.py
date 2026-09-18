@@ -433,7 +433,10 @@ def test_a_competing_protocol_plugin_is_named_in_a_warning(pytester: pytest.Pyte
     result = pytester.runpytest(*RUN)
     out = result.stdout.str()
     assert "both take over the test protocol" in out
-    assert str(pytester.path / "conftest.py") in out
+    # The warning prints the plugin's path inside a list, so on Windows its backslashes
+    # are doubled; the directory's name and the file's name are what a reader needs.
+    assert pytester.path.name in out
+    assert "conftest.py" in out
 
 
 STATS_CONFTEST = """
