@@ -1,0 +1,77 @@
+name: Release
+
+# Publishes to PyPI through trusted publishing when a version tag is pushed.
+# The build job holds no publishing rights; the publish job builds nothing and
+# holds nothing but the OIDC token, behind the "pypi" environment's reviewer.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+      - name: The tag names the version the package carries
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(uv run --no-project python -c 'import re,pathlib; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("src/falsetto/__init__.py").read_text()).group(1))')"
+          test "$tag" = "$version" || { echo "tag v$tag does not match __version__ $version"; exit 1; }
+      - run: uv sync --locked
+      - name: Own checks, every one proven
+        run: uv run --no-sync pytest -p no:cacheprovider --falsetto-json=verdicts.json
+      - name: The suite graded itself
+        shell: bash
+        run: |
+          uv run --no-sync python - <<'PY'
+          import json
+          t = json.load(open("verdicts.json"))["totals"]
+          v = t["verdicts"]
+          assert t["run"] > 0 and t["graded"] == t["run"], t
+          assert v["false"] == 0 and v["unproven"] == 0 and v["failed"] == 0, t
+          PY
+      - run: uv build
+      - name: Install the wheel into a clean environment and grade a declared check with it
+        shell: bash
+        run: |
+          uv venv smoke
+          uv pip install --python smoke/bin/python dist/*.whl pytest
+          mkdir smoke_suite && cat > smoke_suite/test_smoke.py <<'PY'
+          import falsetto
+          VALUE = {"key": "k1"}
+          @falsetto.must_fail_when(lambda m: m.setitem(VALUE, "key", None))
+          def test_proven():
+              assert VALUE["key"] == "k1"
+          PY
+          cd smoke_suite && ../smoke/bin/python -m pytest -p no:cacheprovider --falsetto-strict --falsetto-json=out.json
+          ../smoke/bin/python -c "import json; t=json.load(open('out.json'))['totals']; assert t['verdicts']['proven']==1 and t['graded']==1, t"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

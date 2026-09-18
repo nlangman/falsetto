@@ -50,4 +50,4 @@ The visibility flip is the only irreversible act. Before it:
 2. The package name is in place: `falsetto` is reserved on PyPI as 0.0.0 since 2026-09-15. The licence already is.
 3. The maintainer reads every file in the repository.
 4. Every entry in `docs/prior-art.md` is re-read against its primary source.
-5. A wheel install smoke test exists in CI. The release workflow with trusted publishing and a tag protocol follows the flip, as the first act of row 7, and the 0.0.1 release rides it.
+5. A release workflow with trusted publishing, a tag protocol (the tag must equal `__version__`), and a wheel install smoke test exist in CI. The PyPI trusted publisher and the `pypi` environment with a required reviewer are configured once the repository exists, before the flip; the 0.0.1 release rides the first tag after it.
