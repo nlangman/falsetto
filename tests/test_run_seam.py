@@ -10,9 +10,11 @@ import falsetto
 import falsetto.plugin as plugin
 from tests.helpers import (
     RUN,
+    _NoUndoPatch,
     boundary_is_the_item,
     boundary_is_the_session,
     changes_never_bite,
+    every_fixture_is_in_scope,
     line,
     no_control_run,
 )
@@ -106,6 +108,59 @@ def test_function_fixtures_are_fresh_for_every_run(pytester: pytest.Pytester) ->
     assert line(0, 0, 1, 0) in result.stdout.str()
 
 
+FRESH_TMP_PATH = """
+import falsetto
+
+VALUE = {"key": "k1"}
+
+@falsetto.must_fail_when(lambda m: m.setitem(VALUE, "key", None))
+def test_writes_into_a_fresh_tmp_path(tmp_path):
+    assert list(tmp_path.iterdir()) == []
+    (tmp_path / "left-behind").write_text("still here")
+    assert VALUE["key"] == "k1"
+"""
+
+
+@falsetto.must_fail_when(boundary_is_the_item)
+def test_tmp_path_is_fresh_for_every_run(pytester: pytest.Pytester) -> None:
+    """The README's cost list promises it; a run that reused it would see the earlier file."""
+    pytester.makepyfile(FRESH_TMP_PATH)
+    result = pytester.runpytest(*RUN)
+    assert line(1, 0, 0, 0) in result.stdout.str()
+    assert result.ret == 0
+
+
+DURATIONS = """
+import falsetto
+
+VALUE = {"key": "k1"}
+
+@falsetto.must_fail_when(lambda m: m.setitem(VALUE, "key", None))
+def test_timed():
+    assert VALUE["key"] == "k1"
+"""
+
+
+def graded_runs_are_logged(m: falsetto.Patch) -> None:
+    """Falsifies "--durations reports the positive run only": every graded run logs its reports."""
+
+    def run_protocol(protocol, item, boundary):  # type: ignore[no-untyped-def]
+        return protocol(item, log=True, nextitem=boundary)
+
+    m.setattr(plugin, "_run_protocol", run_protocol)
+
+
+@falsetto.must_fail_when(graded_runs_are_logged)
+def test_durations_reports_the_positive_run_only(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(DURATIONS)
+    result = pytester.runpytest(*RUN, "--durations=0", "-vv")
+    out = result.stdout.str()
+    assert "slowest durations" in out
+    table = out.split("slowest durations", 1)[1]
+    calls = [row for row in table.splitlines() if " call " in row and "::test_timed" in row]
+    assert len(calls) == 1
+
+
 MODULE_FIXTURE = """
 import falsetto
 import pytest
@@ -149,10 +204,6 @@ def ident():
 def test_reads_a_module_fixture(ident):
     assert ident.startswith("id-")
 """
-
-
-def every_fixture_is_in_scope(m: falsetto.Patch) -> None:
-    m.setattr(plugin, "_wider_fixtures", lambda item, scope: [])
 
 
 @falsetto.must_fail_when(every_fixture_is_in_scope)
@@ -302,11 +353,6 @@ def test_a_proven():
 def test_b_sees_the_original_after_the_negative_run():
     assert STATE["key"] == "k1"
 """
-
-
-class _NoUndoPatch(falsetto.Patch):
-    def undo(self) -> None:
-        return None
 
 
 def leak_the_negative_run(m: falsetto.Patch) -> None:

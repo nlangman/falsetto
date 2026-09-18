@@ -5,12 +5,17 @@ from __future__ import annotations
 import contextlib
 import os
 from collections.abc import Callable
-from typing import Any
 
 import falsetto
 import falsetto.core as core
 from falsetto import Declaration, Outcome, Patch, Reason, Result, Verdict
-from tests.helpers import changes_never_bite, no_control_run
+from tests.helpers import (
+    _InertPatch,
+    _NoUndoPatch,
+    _ResolvingPatch,
+    changes_never_bite,
+    no_control_run,
+)
 
 
 def _grades_as(reason: Reason, verdict: Verdict) -> Callable[[Patch], None]:
@@ -113,6 +118,35 @@ def test_check_callable_takes_a_wider_default_expectation() -> None:
     assert widened.verdict is Verdict.PROVEN
 
 
+def the_positive_run_is_a_stand_in(m: Patch) -> None:
+    """Falsifies "check grades the run it was given": a stand-in positive is graded instead."""
+    original = core.prove
+
+    def check(run, decl, **kw):  # type: ignore[no-untyped-def]
+        return original(run, decl, falsetto.RunResult(Outcome.FAILED), **kw)
+
+    m.setattr(core, "check", check)
+
+
+@falsetto.must_fail_when(the_positive_run_is_a_stand_in)
+def test_check_grades_a_runner_supplied_run() -> None:
+    state: dict[str, str | None] = {"key": "k1"}
+    seen: list[str | None] = []
+
+    def run() -> falsetto.RunResult:
+        seen.append(state["key"])
+        if state["key"] == "k1":
+            return falsetto.RunResult(Outcome.PASSED)
+        return falsetto.RunResult(Outcome.FAILED, AssertionError("the key changed"))
+
+    drop = Declaration(lambda m: m.setitem(state, "key", None), describe="key dropped")
+    result = core.check(run, drop)
+
+    assert result is not None
+    assert result.verdict is Verdict.PROVEN
+    assert seen == ["k1", "k1", None]
+
+
 def failures_have_no_evidence(m: Patch) -> None:
     m.setattr(core, "EVIDENCE_LIMIT", 0)
 
@@ -157,19 +191,6 @@ def test_a_positive_run_that_did_not_complete_has_no_verdict() -> None:
     assert result is None
 
 
-class _NoUndoPatch(Patch):
-    def undo(self) -> None:
-        return None
-
-
-class _AppliesNothingPatch(Patch):
-    def setattr(self, target: object, name: str, value: object, raising: bool = True) -> None:
-        return None
-
-    def setitem(self, mapping: Any, key: Any, value: Any) -> None:
-        return None
-
-
 class _OldestFirstPatch(Patch):
     def undo(self) -> None:
         while self._undo:
@@ -187,13 +208,6 @@ class _StopsAtFirstErrorPatch(Patch):
             self._undo.pop()()
 
 
-class _CopiesInheritedPatch(Patch):
-    def setattr(self, target: object, name: str, value: object, raising: bool = True) -> None:
-        old = getattr(target, name)
-        setattr(target, name, value)
-        self._undo.append(lambda: setattr(target, name, old))
-
-
 PatchUnderTest: type[Patch] = Patch
 
 
@@ -207,7 +221,7 @@ def _use(kind: type[Patch]) -> Callable[[Patch], None]:
     return change
 
 
-@falsetto.must_fail_when(_use(_AppliesNothingPatch), describe="handles apply nothing")
+@falsetto.must_fail_when(_use(_InertPatch), describe="handles apply nothing")
 def test_patch_applies_attributes_items_and_env_while_the_block_is_open() -> None:
     class Holder:
         attr = "original"
@@ -306,7 +320,7 @@ def test_patch_undoes_every_step_even_when_one_raises() -> None:
     assert Holder.second == "b"
 
 
-@falsetto.must_fail_when(_use(_CopiesInheritedPatch), describe="undo copies inherited values")
+@falsetto.must_fail_when(_use(_ResolvingPatch), describe="undo copies inherited values")
 def test_patch_restores_an_inherited_attribute_as_inherited() -> None:
     class Base:
         setting = "base"

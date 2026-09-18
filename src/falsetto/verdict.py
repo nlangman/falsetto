@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 
@@ -42,7 +44,18 @@ class Reason(str, Enum):
         return self.value
 
 
-MESSAGES: dict[Reason, str] = {
+def _require_a_message_for_every_reason(messages: Mapping[Reason, str]) -> None:
+    """Refuse a mapping that does not name every Reason.
+
+    ``Result.message`` indexes MESSAGES directly, so a Reason added without one would be a
+    KeyError at report time, on the failure path, long after the mistake was made.
+    """
+    missing = sorted(reason.value for reason in Reason if reason not in messages)
+    if missing:
+        raise AssertionError(f"these reasons have no message: {', '.join(missing)}")
+
+
+_MESSAGES: dict[Reason, str] = {
     Reason.STATED_REASON: (
         "passed again without the change and failed under it for the stated reason"
     ),
@@ -62,7 +75,7 @@ MESSAGES: dict[Reason, str] = {
     Reason.INTERNAL_ERROR: "Falsetto itself raised while grading this check",
 }
 
-HINTS: dict[Reason, str] = {
+_HINTS: dict[Reason, str] = {
     Reason.UNDECLARED: "Declare the change to the subject that should make this check fail.",
     Reason.NEGATIVE_PASSED: (
         "Either the assertion does not observe the change, the fixture is the tautology, the "
@@ -98,6 +111,14 @@ HINTS: dict[Reason, str] = {
     ),
     Reason.INTERNAL_ERROR: "This is a bug in Falsetto or in a hook it called. Please report it.",
 }
+
+_require_a_message_for_every_reason(_MESSAGES)
+
+MESSAGES: Mapping[Reason, str] = MappingProxyType(_MESSAGES)
+"""The sentence each Reason reports; every Reason has one, checked when this module loads."""
+
+HINTS: Mapping[Reason, str] = MappingProxyType(_HINTS)
+"""The advice a non-green Reason carries, when there is any."""
 
 
 @dataclass(frozen=True)

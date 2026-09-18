@@ -103,6 +103,50 @@ def test_an_interrupted_undo_step_does_not_strand_the_others() -> None:
     assert calm["key"] == "original"
 
 
+class _DropsTheContextPatch(Patch):
+    """A handle whose undo raises the interrupt with nothing chained onto it."""
+
+    def undo(self) -> None:
+        try:
+            super().undo()
+        except BaseException as e:
+            e.__context__ = None
+            raise
+
+
+PatchUnderTest: type[Patch] = Patch
+
+
+def the_interrupt_is_raised_alone(m: Patch) -> None:
+    """Falsifies "an interrupt carries the ordinary error another step raised as its context"."""
+    import tests.test_release_hardening as here
+
+    m.setattr(here, "PatchUnderTest", _DropsTheContextPatch)
+
+
+@falsetto.must_fail_when(the_interrupt_is_raised_alone)
+def test_an_interrupted_undo_carries_the_other_steps_error_as_its_context() -> None:
+    class Hostile:
+        def __init__(self) -> None:
+            object.__setattr__(self, "value", "original")
+
+        def __setattr__(self, name: str, value: object) -> None:
+            if value == "original":
+                raise KeyboardInterrupt("interrupted while reverting")
+            object.__setattr__(self, name, value)
+
+    hostile = Hostile()
+
+    patch = PatchUnderTest()
+    patch._undo.append(lambda: (_ for _ in ()).throw(RuntimeError("an undo step failed")))
+    patch.setattr(hostile, "value", "changed")
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        patch.undo()
+    assert isinstance(caught.value.__context__, RuntimeError)
+    assert str(caught.value.__context__) == "an undo step failed"
+
+
 def the_description_is_verbatim(m: Patch) -> None:
     """Falsifies "a declaration's description is bounded before it reaches a report"."""
     m.setattr(
@@ -248,6 +292,59 @@ def test_an_undo_that_raises_is_its_own_verdict_not_an_internal_error() -> None:
     assert result.detail is not None
     assert "RuntimeError: the original value is not accepted back" in result.detail
     assert result.evidence is not None
+
+
+class Unusual(BaseException):
+    """A BaseException outside the passthrough set: neither an interrupt nor an ordinary error."""
+
+
+def only_ordinary_undo_failures_are_a_verdict(m: Patch) -> None:
+    """Falsifies "an undo raising any non-passthrough BaseException is the not-reverted verdict".
+
+    The narrower ``except Exception`` is restored, so an unusual one escapes ``prove`` instead
+    of becoming the verdict that stops the session. That escape is the failure ``expect=`` names.
+    """
+
+    def revert(patch: Patch, declared: str | None, passthrough: core.Passthrough) -> Any:
+        try:
+            patch.undo()
+        except passthrough:
+            raise
+        except Exception as e:
+            detail = core.describe_exception(e)
+            return falsetto.Result(Verdict.UNPROVEN, Reason.NOT_REVERTED, declared, detail)
+        return None
+
+    m.setattr(core, "_revert", revert)
+
+
+@falsetto.must_fail_when(only_ordinary_undo_failures_are_a_verdict, expect=Unusual)
+def test_an_undo_that_raises_an_unusual_base_exception_is_its_own_verdict() -> None:
+    class Hostile:
+        value: str
+
+        def __init__(self) -> None:
+            object.__setattr__(self, "value", "original")
+
+        def __setattr__(self, name: str, value: object) -> None:
+            if value == "original":
+                raise Unusual("the original value is not accepted back")
+            object.__setattr__(self, name, value)
+
+    subject = Hostile()
+
+    def cell() -> None:
+        assert subject.value == "original"
+
+    decl = Declaration(
+        change=lambda m: m.setattr(subject, "value", "changed"), describe="the value changed"
+    )
+    result = core.check_callable(cell, decl)
+
+    assert result.verdict is Verdict.UNPROVEN
+    assert result.reason is Reason.NOT_REVERTED
+    assert result.detail is not None
+    assert "Unusual: the original value is not accepted back" in result.detail
 
 
 CHANGE_THAT_RAISES = """

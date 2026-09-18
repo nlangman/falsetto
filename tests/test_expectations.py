@@ -91,6 +91,49 @@ def test_expectation_can_name_an_exception_type(pytester: pytest.Pytester) -> No
     assert result.ret == 0
 
 
+EXPECTED_TUPLE = """
+import falsetto
+
+def value_error():
+    raise ValueError("one way to break")
+
+def key_error():
+    raise KeyError("another way to break")
+
+STATE = {"f": lambda: 1}
+
+@falsetto.must_fail_when(lambda m: m.setitem(STATE, "f", value_error),
+                         expect=(ValueError, KeyError))
+def test_the_first_of_the_tuple():
+    assert STATE["f"]() == 1
+
+@falsetto.must_fail_when(lambda m: m.setitem(STATE, "f", key_error),
+                         expect=(ValueError, KeyError))
+def test_the_second_of_the_tuple():
+    assert STATE["f"]() == 1
+"""
+
+
+def only_the_first_expected_type_counts(m: falsetto.Patch) -> None:
+    """Falsifies "expect=(A, B) accepts either": only the first type in the tuple is expected."""
+    original = Declaration.matches
+
+    def matches(self: Declaration, exc: BaseException | None, default: Any) -> tuple[bool, str]:
+        if isinstance(self.expect, tuple) and self.expect:
+            return original(Declaration(self.change, expect=self.expect[0]), exc, default)
+        return original(self, exc, default)
+
+    m.setattr(Declaration, "matches", matches)
+
+
+@falsetto.must_fail_when(only_the_first_expected_type_counts)
+def test_a_tuple_expectation_accepts_either_exception(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(EXPECTED_TUPLE)
+    result = pytester.runpytest(*RUN)
+    assert line(2, 0, 0, 0) + " (2 graded of 2 run)" in result.stdout.str()
+    assert result.ret == 0
+
+
 PREDICATE = """
 import falsetto
 

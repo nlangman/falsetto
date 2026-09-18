@@ -36,9 +36,39 @@ class _InertPatch(Patch):
         return None
 
 
+class _NoUndoPatch(Patch):
+    """A handle that reverts nothing: whatever a change applied is still applied afterwards."""
+
+    def undo(self) -> None:
+        return None
+
+
+class _ResolvingPatch(Patch):
+    """A handle whose setattr reads the old value through ``getattr`` instead of the class slot.
+
+    It restores what the attribute resolved to rather than what the class itself held, so an
+    inherited value is copied onto the child and a descriptor comes back already bound.
+    """
+
+    def setattr(self, target: object, name: str, value: object, raising: bool = True) -> None:
+        old = getattr(target, name)
+        setattr(target, name, value)
+        self._undo.append(lambda: setattr(target, name, old))
+
+
 def changes_never_bite(m: Patch) -> None:
     """Falsifies "the negative run applies the declared change"."""
     m.setattr(core, "Patch", _InertPatch)
+
+
+def markers_are_ignored(m: Patch) -> None:
+    """Falsifies "the no_proof marker is read": no check carries one."""
+    m.setattr(plugin, "_marker_reason", lambda item: None)
+
+
+def every_fixture_is_in_scope(m: Patch) -> None:
+    """Falsifies "a fixture wider than the declaration's scope is found": none ever is."""
+    m.setattr(plugin, "_wider_fixtures", lambda item, scope: [])
 
 
 def false_never_fails_the_build(m: Patch) -> None:

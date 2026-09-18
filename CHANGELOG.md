@@ -56,6 +56,17 @@ All notable changes to Falsetto are recorded here. The format follows
   usage error rather than a crash inside `pytest_configure`.
 - An interrupt raised by one undo step no longer strands the remaining ones: every step runs,
   and the interrupt is raised afterwards, ahead of any ordinary error.
+- An interrupt raised by one undo step no longer drops what another step raised with it. The
+  first ordinary error becomes the interrupt's `__context__`, so a traceback still names
+  everything that went wrong while the subject was being put back.
+- An undo step that raises something outside the passthrough set that is not an `Exception` is
+  the verdict not-reverted, like every other undo that failed, rather than an internal error
+  reported as a bug in Falsetto while every later check runs against a subject that is still
+  patched. The catch that applies a declared change and the catch that undoes it are now the
+  same width.
+- A `Reason` with no sentence in `MESSAGES` is refused when `falsetto.verdict` loads, rather
+  than a `KeyError` raised while a report is written, on the failure path, long after the
+  reason was added. `MESSAGES` and `HINTS` are read-only mappings.
 - A declaration's description and expectation, and an internal error's traceback, are bounded
   before they reach a report.
 

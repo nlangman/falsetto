@@ -11,7 +11,13 @@ import pytest
 
 import falsetto
 import falsetto.plugin as plugin
-from tests.helpers import RUN, everything_is_proven, false_never_fails_the_build, line
+from tests.helpers import (
+    RUN,
+    everything_is_proven,
+    false_never_fails_the_build,
+    line,
+    markers_are_ignored,
+)
 
 XFAIL = """
 import pytest
@@ -88,10 +94,6 @@ def test_live():
 """
 
 
-def markers_are_ignored(m: falsetto.Patch) -> None:
-    m.setattr(plugin, "_marker_reason", lambda item: None)
-
-
 @falsetto.must_fail_when(markers_are_ignored)
 def test_excluded_checks_are_listed_and_never_a_pass(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(EXCLUDED)
@@ -101,6 +103,37 @@ def test_excluded_checks_are_listed_and_never_a_pass(pytester: pytest.Pytester) 
     assert "0 graded of 1 run; 1 excluded" in out
     assert "no check was graded" in out
     assert result.ret == 1
+
+
+KEYWORD_REASON = """
+import pytest
+
+@pytest.mark.no_proof(reason="talks to a live service")
+def test_live():
+    assert True
+"""
+
+
+def only_a_positional_reason_counts(m: falsetto.Patch) -> None:
+    """Falsifies "no_proof takes its reason as a keyword": only a positional one is read."""
+
+    def marker_reason(item: pytest.Item) -> str | None:
+        marker = item.get_closest_marker(plugin.MARKER)
+        if marker is None:
+            return None
+        return str(marker.args[0] if marker.args else "").strip()
+
+    m.setattr(plugin, "_marker_reason", marker_reason)
+
+
+@falsetto.must_fail_when(only_a_positional_reason_counts)
+def test_no_proof_takes_its_reason_as_a_keyword(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(KEYWORD_REASON)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+    assert "::test_live: talks to a live service" in out
+    assert "0 graded of 1 run; 1 excluded" in out
+    assert result.ret == 0
 
 
 NO_REASON = """

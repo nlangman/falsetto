@@ -11,7 +11,14 @@ import falsetto
 import falsetto.core as core
 import falsetto.plugin as plugin
 from falsetto import Patch
-from tests.helpers import RUN, boundary_is_the_item, line
+from tests.helpers import (
+    RUN,
+    _ResolvingPatch,
+    boundary_is_the_item,
+    every_fixture_is_in_scope,
+    line,
+    markers_are_ignored,
+)
 
 INDIRECT = """
 import falsetto
@@ -45,10 +52,6 @@ def test_usefixtures():
     # always true: this check must still pass under the change, so its verdict is out of scope
     assert CONFIG["limit"] == 10 or True
 """
-
-
-def every_fixture_is_in_scope(m: Patch) -> None:
-    m.setattr(plugin, "_wider_fixtures", lambda item, scope: [])
 
 
 @falsetto.must_fail_when(every_fixture_is_in_scope)
@@ -157,11 +160,27 @@ def test_two_control_runs_catch_residue_that_appears_on_the_third_execution(
     assert "control run 2 failed" in out
 
 
-class _ResolvingPatch(Patch):
-    def setattr(self, target: object, name: str, value: object, raising: bool = True) -> None:
-        old = getattr(target, name)
-        setattr(target, name, value)
-        self._undo.append(lambda: setattr(target, name, old))
+CONTROLS_INI = "[pytest]\nfalsetto_controls = 2\n"
+
+
+def the_controls_ini_is_ignored(m: Patch) -> None:
+    """Falsifies "a valid falsetto_controls ini value sets the control runs": the default stands."""
+    real = plugin._controls
+
+    def controls(config: pytest.Config, enabled: bool) -> int:
+        return real(config, enabled) if config.getoption("falsetto_controls") is not None else 1
+
+    m.setattr(plugin, "_controls", controls)
+
+
+@falsetto.must_fail_when(the_controls_ini_is_ignored)
+def test_the_controls_ini_value_adds_a_control_run(pytester: pytest.Pytester) -> None:
+    pytester.makeini(CONTROLS_INI)
+    pytester.makepyfile(PERIOD_THREE)
+    result = pytester.runpytest(*RUN)
+    out = result.stdout.str()
+    assert line(0, 0, 0, 1) in out
+    assert "control run 2 failed" in out
 
 
 PatchUnderTest: type[Patch] = Patch
@@ -373,10 +392,6 @@ def test_x():
 """
 
 
-def markers_are_ignored(m: Patch) -> None:
-    m.setattr(plugin, "_marker_reason", lambda item: None)
-
-
 @falsetto.must_fail_when(markers_are_ignored)
 def test_a_misconfigured_marker_is_reported_even_on_an_xfail_check(
     pytester: pytest.Pytester,
@@ -413,7 +428,7 @@ def test_a_check_another_plugin_ran_is_reported_as_not_graded(pytester: pytest.P
     assert "not gradable" not in out
 
 
-FALSE_THEN_MORE = """
+FALSE_THEN_PROVEN = """
 import falsetto
 
 VALUE = {"key": "k1"}
@@ -435,7 +450,7 @@ def sessions_never_stop(m: Patch) -> None:
 
 @falsetto.must_fail_when(sessions_never_stop)
 def test_the_json_report_says_when_the_session_stopped_early(pytester: pytest.Pytester) -> None:
-    pytester.makepyfile(FALSE_THEN_MORE)
+    pytester.makepyfile(FALSE_THEN_PROVEN)
     path = pytester.path / "falsetto.json"
     result = pytester.runpytest(*RUN, "-x", f"--falsetto-json={path}")
     payload = json.loads(path.read_text())

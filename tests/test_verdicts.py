@@ -6,6 +6,8 @@ import pytest
 
 import falsetto
 import falsetto.plugin as plugin
+import falsetto.verdict as verdict
+from falsetto import Reason
 from tests.helpers import (
     RUN,
     changes_never_bite,
@@ -13,6 +15,21 @@ from tests.helpers import (
     false_never_fails_the_build,
     line,
 )
+
+
+def a_reason_without_a_message_is_accepted(m: falsetto.Patch) -> None:
+    """Falsifies "a Reason with no message is refused": any mapping is accepted."""
+    m.setattr(verdict, "_require_a_message_for_every_reason", lambda messages: None)
+
+
+@falsetto.must_fail_when(a_reason_without_a_message_is_accepted)
+def test_a_reason_without_a_message_is_refused() -> None:
+    incomplete: dict[Reason, str] = {
+        r: verdict.MESSAGES[r] for r in Reason if r is not Reason.POSITIVE_FAILED
+    }
+    with pytest.raises(AssertionError, match="positive-failed"):
+        verdict._require_a_message_for_every_reason(incomplete)
+
 
 FOUR = """
 import falsetto
@@ -237,7 +254,13 @@ def test_red():
 
 
 def internal_error_replaces_the_failure(m: falsetto.Patch) -> None:
-    m.setattr(plugin, "_combine", lambda existing, added: added)
+    """Falsifies "a failing report keeps the text it already carried": the new text replaces it."""
+
+    def fail_report(report: pytest.TestReport, text: str) -> None:
+        report.outcome = "failed"
+        report.longrepr = text
+
+    m.setattr(plugin, "_fail_report", fail_report)
 
 
 @falsetto.must_fail_when(internal_error_replaces_the_failure)

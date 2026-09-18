@@ -123,13 +123,16 @@ def _revert(patch: Patch, declared: str | None, passthrough: Passthrough) -> Res
     """Undo the declared change; the verdict when it could not be undone, else None.
 
     A subject that stayed patched outlives the check, so this is never an internal error in
-    Falsetto: it is a verdict of its own, and a front-end can stop the session on it.
+    Falsetto: it is a verdict of its own, and a front-end can stop the session on it. The
+    catch is as wide as the one that applies the change, so an undo step raising something
+    outside ``passthrough`` that is not an ``Exception`` is that verdict too, rather than an
+    internal error that leaves the subject patched for every later check.
     """
     try:
         patch.undo()
     except passthrough:
         raise
-    except Exception as e:
+    except BaseException as e:
         detail = "; ".join(p for p in (describe_exception(e), location_of(e)) if p)
         text = "".join(traceback.format_exception(type(e), e, e.__traceback__))
         return Result(Verdict.UNPROVEN, Reason.NOT_REVERTED, declared, detail, evidence(text))

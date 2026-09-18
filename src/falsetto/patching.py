@@ -24,7 +24,8 @@ class Patch:
 
     Use it as a context manager. Every change is recorded and undone in reverse
     order when the block ends, whether or not the block raised. An undo step that
-    raises does not stop the others; the first error is raised after every step ran.
+    raises does not stop the others; the first error is raised after every step ran,
+    and nothing another step raised is dropped without a trace.
     An attribute the target inherited is restored as inherited, not copied onto it.
     Anything changed outside the handle is not reverted, and Falsetto cannot see it.
     """
@@ -43,7 +44,9 @@ class Patch:
 
         An interrupt (``KeyboardInterrupt``, ``SystemExit``) raised by one step does not
         leave the subject half-restored: the remaining steps still run, and the interrupt
-        is raised afterwards, ahead of any ordinary error.
+        is raised afterwards, ahead of any ordinary error. That error is not lost with it:
+        the first one becomes the interrupt's ``__context__``, so a traceback still shows
+        what else went wrong while the subject was being put back.
         """
         errors: list[BaseException] = []
         interrupts: list[BaseException] = []
@@ -53,7 +56,15 @@ class Patch:
                 continue
             (errors if isinstance(raised, Exception) else interrupts).append(raised)
         if interrupts:
-            raise interrupts[0]
+            if not errors:
+                raise interrupts[0]
+            # Raising the error first makes it the exception being handled, so the
+            # interrupt chains onto it. Assigning __context__ instead would be lost:
+            # the raise overwrites it with whatever is being handled around undo().
+            try:
+                raise errors[0]
+            except BaseException:
+                raise interrupts[0]  # noqa: B904
         if errors:
             if len(errors) == 1:
                 raise errors[0]

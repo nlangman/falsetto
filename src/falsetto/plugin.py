@@ -22,7 +22,7 @@ import platform
 import site
 import sysconfig
 import traceback
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -334,6 +334,21 @@ def _boundary(item: pytest.Item, scope: str) -> TeardownTarget:
     return cast(TeardownTarget, item.parent)
 
 
+def _run_protocol(
+    protocol: Callable[..., list[pytest.TestReport]],
+    item: pytest.Item,
+    boundary: TeardownTarget,
+) -> list[pytest.TestReport]:
+    """Run one whole protocol, tearing fixtures down to ``boundary`` when it ends.
+
+    The protocol is passed in rather than looked up, so a check whose declared change
+    patches ``runtestprotocol`` does not also rewrite how its own graded runs are made.
+    pytest types ``nextitem`` as an Item; this is the one place TeardownTarget's wider
+    set of nodes is cast to it.
+    """
+    return protocol(item, log=False, nextitem=cast(Any, boundary))
+
+
 def _site_dirs() -> tuple[str, ...]:
     dirs: set[str] = set()
     with contextlib.suppress(Exception):
@@ -441,19 +456,21 @@ def _grade(
     decl: Declaration | None,
     reason: str | None,
     settings: Settings,
+    scope_problem: str | None,
 ) -> Result | None:
-    # Both seams are bound once, here, before the declared change is applied. A change that
-    # patches _observe or runtestprotocol must reach the runs it declares against without
-    # also rewriting how this check's own negative run is performed and observed.
-    observe, protocol = _observe, runtestprotocol
+    # All three seams are bound once, here, before the declared change is applied. A change
+    # that patches _observe, _run_protocol or runtestprotocol must reach the runs it declares
+    # against without also rewriting how this check's own negative run is performed and
+    # observed; a late lookup on any of them would let a check rewrite its own grading.
+    observe, protocol, run_protocol = _observe, runtestprotocol, _run_protocol
     if reason is not None and not reason:
         return core.misconfigured("the no_proof marker carries no reason", decl)
     if reason is not None and decl is not None:
         return core.misconfigured(
             "the no_proof marker and a declaration contradict each other", decl
         )
-    if decl is not None and (why := _scope_applies(item, decl.scope)) is not None:
-        return core.misconfigured(why, decl)
+    if scope_problem is not None:
+        return core.misconfigured(scope_problem, decl)
     positive = observe(item, reports, graded_run=False)
     if positive is None:
         return None
@@ -467,7 +484,7 @@ def _grade(
 
     def run() -> RunResult:
         with _coverage_paused(), _debuggers_paused(item.config):
-            reports = protocol(item, log=False, nextitem=cast(Any, boundary))
+            reports = run_protocol(protocol, item, boundary)
             observed = observe(item, reports, graded_run=True)
         if observed is None:
             return RunResult(Outcome.ERRORED, summary="the run produced no gradable call report")
@@ -536,8 +553,11 @@ def _attach_target(reports: list[pytest.TestReport]) -> pytest.TestReport | None
     return by_when.get("call") or by_when.get("teardown") or by_when.get("setup")
 
 
-def _combine(existing: str, added: str) -> str:
-    return f"{existing}\n\n{added}" if existing else added
+def _fail_report(report: pytest.TestReport, text: str) -> None:
+    """Fail a report with ``text``, keeping whatever failure text it already carried."""
+    existing = report.longreprtext if report.longrepr is not None else ""
+    report.outcome = "failed"
+    report.longrepr = f"{existing}\n\n{text}" if existing else text
 
 
 def _attach(
@@ -555,9 +575,7 @@ def _attach(
     target = _attach_target(reports)
     if target is None:
         return
-    existing = target.longreprtext if target.longrepr is not None else ""
-    target.outcome = "failed"
-    target.longrepr = _combine(existing, _longrepr(result, item))
+    _fail_report(target, _longrepr(result, item))
 
 
 def _stopping(item: pytest.Item, reports: list[pytest.TestReport]) -> bool:
@@ -600,9 +618,7 @@ def _report_teardown_failure(
             item.nodeid, item.location, {}, "passed", None, "teardown", [], 0.0, 0.0, 0.0
         )
         reports.append(teardown)
-    existing = teardown.longreprtext if teardown.longrepr is not None else ""
-    teardown.outcome = "failed"
-    teardown.longrepr = _combine(existing, text)
+    _fail_report(teardown, text)
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -616,14 +632,16 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     try:
         decl = get_declaration(getattr(item, "obj", None))
         reason = _marker_reason(item)
-        declared = decl is not None and reason is None
         boundary: TeardownTarget = nextitem
-        if declared and decl is not None and _scope_applies(item, decl.scope) is None:
-            boundary = _boundary(item, decl.scope)
+        scope_problem: str | None = None
+        if decl is not None and reason is None:
+            scope_problem = _scope_applies(item, decl.scope)
+            if scope_problem is None:
+                boundary = _boundary(item, decl.scope)
         ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
-        reports = runtestprotocol(item, log=False, nextitem=cast(Any, boundary))
+        reports = _run_protocol(runtestprotocol, item, boundary)
         try:
-            result = _grade(item, reports, boundary, decl, reason, settings)
+            result = _grade(item, reports, boundary, decl, reason, settings, scope_problem)
         except PASSTHROUGH:
             raise
         except BaseException as e:
