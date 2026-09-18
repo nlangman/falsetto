@@ -2,7 +2,7 @@
 
 **A green you can trust.**
 
-Falsetto helps agents identify bad tests and evals while they write and run them. Today, agents write tests and evals at a volume that makes human validation infeasible. Test runners only report pass and fail. They cannot identify a test that cannot fail. Mutation tools evaluate a whole suite with random edits, take hours, and report which edits survived, not which test is at fault. Bad tests create a false sense of confidence for agents and humans.
+Falsetto helps agentic AI coding agents identify bad tests and evals while they write and run them. Today, agents write tests and evals at a volume that makes human validation infeasible. Test runners only report pass and fail. They cannot identify a test that cannot fail. Mutation tools evaluate a whole suite with random edits, take hours, and report which edits survived, not which test is at fault. Bad tests create a false sense of confidence for agents and humans.
 
 Falsetto is a pytest plugin that finds the false voice in your suite and shouts loudly at it. Falsetto asks each test for one change to the code being tested that should make it red, runs the test without and then with that change, and only counts tests that fail when they should. The result is a green you can trust: every passing check deliberately proven able to fail, checks that quietly stop being able to fail turn the build red, and agents get real-time signal while they build and run.
 
